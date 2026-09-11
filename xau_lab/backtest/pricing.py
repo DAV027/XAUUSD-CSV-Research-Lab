@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from xau_lab.backtest.models import CostModel, SymbolSpec
 
 
@@ -9,7 +11,14 @@ def _validate_spread(spread_points: int | float) -> None:
 
 
 def _round_price(price: float, symbol: SymbolSpec) -> float:
-    return round(float(price), symbol.digits)
+    """Quantize to broker digits with deterministic half-away-from-zero rounding."""
+    scale = 10.0 ** symbol.digits
+    scaled = float(price) * scale
+    if scaled >= 0.0:
+        units = math.floor(scaled + 0.5 + 1e-9)
+    else:
+        units = math.ceil(scaled - 0.5 - 1e-9)
+    return units / scale
 
 
 def buy_entry_price(
