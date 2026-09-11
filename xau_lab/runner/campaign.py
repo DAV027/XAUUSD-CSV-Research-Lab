@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import multiprocessing as mp
 import os
 import traceback
 from concurrent.futures import ProcessPoolExecutor
@@ -194,9 +195,11 @@ def run_campaign(
         return
 
     # Parent is the only writer. executor.map preserves input order, so CSV output
-    # remains deterministic across worker counts.
+    # remains deterministic across worker counts. Spawn avoids inheriting Numba/LLVM
+    # runtime state from the parent and matches Windows process semantics.
     with ProcessPoolExecutor(
         max_workers=workers,
+        mp_context=mp.get_context("spawn"),
         initializer=_init_worker,
         initargs=(str(feature_path),),
     ) as executor:
