@@ -1,0 +1,9 @@
+{
+  "broker_timezone": "Etc/UTC",
+  "asia_start": "00:00",
+  "asia_end": "08:00",
+  "london_start": "08:00",
+  "london_end": "17:00",
+  "new_york_start": "13:30",
+  "new_york_end": "22:00"
+}
