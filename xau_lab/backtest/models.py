@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
 
@@ -15,6 +16,7 @@ class MarketBars:
     close: np.ndarray
     spread: np.ndarray
     atr: np.ndarray
+    broker_timezone: str = "UTC"
 
     def __post_init__(self) -> None:
         arrays = {
@@ -29,6 +31,10 @@ class MarketBars:
         lengths = {len(value) for value in arrays.values()}
         if len(lengths) != 1:
             raise ValueError("MarketBars arrays must have equal length")
+        try:
+            ZoneInfo(self.broker_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"invalid broker timezone: {self.broker_timezone}") from exc
         for name, value in arrays.items():
             value = np.ascontiguousarray(value)
             value.setflags(write=False)
