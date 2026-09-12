@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timezone
 
 import numpy as np
@@ -9,7 +10,14 @@ from xau_lab.experiments.spec import CompleteExperiment, canonical_json
 from xau_lab.runner.single import MarketBundle
 from xau_lab.strategies.base import StrategyContext, StrategyDefinition
 from xau_lab.strategies.registry import register_strategy
-from xau_lab.validation.stress import StressConfig, parameter_neighbors, stress_candidate
+from xau_lab.validation.stress import (
+    STRESS_RESULT_FIELDS,
+    StressConfig,
+    parameter_neighbors,
+    run_stress_suite,
+    stress_candidate,
+    write_stress_results,
+)
 
 
 def test_integer_numeric_neighbors_are_plus_minus_10_and_20_percent_with_domain_clipping():
@@ -108,6 +116,24 @@ def test_stress_candidate_runs_required_cost_scenarios_and_reports_stability():
     assert 0.0 <= report.parameter_stability_pct <= 100.0
     assert 0.0 <= report.cost_stability_pct <= 100.0
     assert report.max_drawdown_pct >= 0.0
+
+
+def test_approved_run_stress_suite_interface_uses_default_matrix():
+    report = run_stress_suite(_candidate(), _market())
+    assert report.parameter_run_count == 4
+    assert report.cost_run_count == 10
+
+
+def test_stress_writer_records_all_runs_with_canonical_fields(tmp_path):
+    report = run_stress_suite(_candidate(), _market())
+    output = tmp_path / "STRESS_RESULTS.csv"
+    write_stress_results(output, report.results)
+    with output.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        assert tuple(reader.fieldnames or ()) == STRESS_RESULT_FIELDS
+        rows = list(reader)
+    assert len(rows) == report.parameter_run_count + report.cost_run_count
+    assert {row["stress_type"] for row in rows} == {"parameter", "cost"}
 
 
 def test_stress_is_deterministic_for_same_candidate_and_market():
