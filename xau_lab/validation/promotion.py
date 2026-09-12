@@ -54,18 +54,18 @@ def stage1_decision(
         reasons.append("profitable_years_not_majority")
 
     top_five = _number(metrics, "top_5_trade_profit_fraction")
-    if top_five is not None and top_five > TOP_FIVE_PROFIT_FRACTION_MAX:
+    if top_five is None:
+        reasons.append("top_five_profit_concentration_missing")
+    elif top_five > TOP_FIVE_PROFIT_FRACTION_MAX:
         reasons.append("top_five_profit_concentration_above_50_pct")
 
     best_month = _number(metrics, "best_month_profit_fraction")
     active_months = _number(metrics, "active_months")
-    if (
-        best_month is not None
-        and active_months is not None
-        and active_months >= BEST_MONTH_MIN_ACTIVE_MONTHS
-        and best_month > BEST_MONTH_PROFIT_FRACTION_MAX
-    ):
-        reasons.append("best_month_profit_concentration_above_60_pct")
+    if active_months is not None and active_months >= BEST_MONTH_MIN_ACTIVE_MONTHS:
+        if best_month is None:
+            reasons.append("best_month_profit_concentration_missing")
+        elif best_month > BEST_MONTH_PROFIT_FRACTION_MAX:
+            reasons.append("best_month_profit_concentration_above_60_pct")
 
     if not integrity_ok:
         reasons.append("integrity_failure")
