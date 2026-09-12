@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import time
+from collections import Counter
 from pathlib import Path
 
 from xau_lab.runner.campaign import run_campaign
@@ -14,11 +15,104 @@ from xau_lab.runner.manifest import (
 )
 
 
-def _completed_count(path: Path) -> int:
+def _completed_ids(path: Path) -> set[str]:
     if not path.exists():
-        return 0
+        return set()
     with path.open("r", encoding="utf-8", newline="") as handle:
-        return sum(1 for _ in csv.DictReader(handle))
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames or "experiment_id" not in reader.fieldnames:
+            raise ValueError("MASTER_RESULTS.csv is missing experiment_id")
+        return {
+            experiment_id
+            for row in reader
+            if (experiment_id := (row.get("experiment_id") or "").strip())
+        }
+
+
+def _bucket_quotas(bucket_sizes: dict[str, int], count: int) -> dict[str, int]:
+    total = sum(bucket_sizes.values())
+    if count <= 0:
+        raise ValueError("smoke count must be positive")
+    if count > total:
+        raise ValueError(f"smoke count {count} exceeds catalog size {total}")
+
+    bucket_order = list(bucket_sizes)
+    raw = {bucket: count * size / total for bucket, size in bucket_sizes.items()}
+    quotas = {bucket: int(raw[bucket]) for bucket in bucket_order}
+    remaining = count - sum(quotas.values())
+    ranked = sorted(
+        bucket_order,
+        key=lambda bucket: (-(raw[bucket] - quotas[bucket]), bucket_order.index(bucket)),
+    )
+    for bucket in ranked:
+        if remaining == 0:
+            break
+        if quotas[bucket] < bucket_sizes[bucket]:
+            quotas[bucket] += 1
+            remaining -= 1
+    if remaining:
+        raise RuntimeError("could not allocate exact smoke quotas")
+
+    # When the smoke count is at least the number of non-empty buckets, make the
+    # data-compatibility gate exercise every bucket while staying deterministic.
+    if count >= len(bucket_order):
+        for bucket in bucket_order:
+            if quotas[bucket] != 0:
+                continue
+            donors = [candidate for candidate in bucket_order if quotas[candidate] > 1]
+            if not donors:
+                raise RuntimeError("could not preserve smoke bucket coverage")
+            donor = max(
+                donors,
+                key=lambda candidate: (
+                    quotas[candidate] - raw[candidate],
+                    quotas[candidate],
+                    -bucket_order.index(candidate),
+                ),
+            )
+            quotas[donor] -= 1
+            quotas[bucket] += 1
+
+    return quotas
+
+
+def select_stratified_smoke_ids(catalog_path: Path, count: int) -> list[str]:
+    with Path(catalog_path).open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        raise ValueError("experiment catalog is empty")
+
+    required = {"experiment_id", "allocation_bucket"}
+    missing = required.difference(rows[0])
+    if missing:
+        raise ValueError(f"experiment catalog missing required columns: {sorted(missing)}")
+
+    bucket_sizes: dict[str, int] = {}
+    seen_ids: set[str] = set()
+    normalized: list[tuple[str, str]] = []
+    for row in rows:
+        experiment_id = (row.get("experiment_id") or "").strip()
+        bucket = (row.get("allocation_bucket") or "").strip()
+        if not experiment_id or not bucket:
+            raise ValueError("experiment catalog requires non-empty experiment_id and allocation_bucket")
+        if experiment_id in seen_ids:
+            raise ValueError(f"experiment catalog contains duplicate experiment_id: {experiment_id}")
+        seen_ids.add(experiment_id)
+        normalized.append((experiment_id, bucket))
+        bucket_sizes[bucket] = bucket_sizes.get(bucket, 0) + 1
+
+    quotas = _bucket_quotas(bucket_sizes, count)
+    selected: list[str] = []
+    selected_by_bucket: Counter[str] = Counter()
+    for experiment_id, bucket in normalized:
+        if selected_by_bucket[bucket] >= quotas[bucket]:
+            continue
+        selected.append(experiment_id)
+        selected_by_bucket[bucket] += 1
+
+    if len(selected) != count:
+        raise RuntimeError(f"selected {len(selected)} smoke experiments; expected {count}")
+    return selected
 
 
 def main() -> None:
@@ -43,31 +137,49 @@ def main() -> None:
     )
     write_or_validate_run_manifest(args.result_root, manifest)
 
-    before = _completed_count(args.result_root / "MASTER_RESULTS.csv")
-    started = time.perf_counter()
-    run_campaign(args.catalog, args.features, args.result_root, workers=workers, limit=args.count)
-    elapsed = time.perf_counter() - started
-    after = _completed_count(args.result_root / "MASTER_RESULTS.csv")
-    completed_now = after - before
+    selected_ids = select_stratified_smoke_ids(args.catalog, args.count)
+    selected_set = set(selected_ids)
+    master_path = args.result_root / "MASTER_RESULTS.csv"
+    before_ids = _completed_ids(master_path)
+    before_selected = len(before_ids.intersection(selected_set))
 
-    if completed_now != args.count:
+    started = time.perf_counter()
+    run_campaign(
+        args.catalog,
+        args.features,
+        args.result_root,
+        workers=workers,
+        experiment_ids=selected_ids,
+    )
+    elapsed = time.perf_counter() - started
+
+    after_ids = _completed_ids(master_path)
+    after_selected = len(after_ids.intersection(selected_set))
+    completed_now = after_selected - before_selected
+
+    if after_selected != args.count:
         raise RuntimeError(
-            f"smoke campaign completed {completed_now} experiments; expected exactly {args.count}. "
+            f"smoke target has {after_selected} completed selected experiments; expected {args.count}. "
             "Inspect ERRORS.csv before continuing."
         )
 
-    print(f"Completed {completed_now} smoke experiments; total stored: {after}")
+    print(
+        f"Smoke target complete: {after_selected} selected experiments; "
+        f"executed this invocation: {completed_now}; total stored: {len(after_ids)}"
+    )
 
-    if args.count == 100:
-        per_experiment = elapsed / completed_now if completed_now else None
-        projected = per_experiment * 50_000 if per_experiment is not None else None
+    if args.count == 100 and completed_now > 0:
+        per_experiment = elapsed / completed_now
+        projected = per_experiment * 50_000
         benchmark = {
             "completed_experiments": completed_now,
+            "smoke_target_experiments": args.count,
+            "preexisting_selected_experiments": before_selected,
             "elapsed_seconds": elapsed,
             "seconds_per_experiment": per_experiment,
             "projected_50000_seconds": projected,
-            "projected_50000_hours": (projected / 3600.0) if projected is not None else None,
-            "requires_profiling_before_full_run": bool(projected is not None and projected > 24 * 3600),
+            "projected_50000_hours": projected / 3600.0,
+            "requires_profiling_before_full_run": projected > 24 * 3600,
         }
         (args.result_root / "THROUGHPUT_BENCHMARK.json").write_text(
             json.dumps(benchmark, sort_keys=True, indent=2) + "\n", encoding="utf-8"

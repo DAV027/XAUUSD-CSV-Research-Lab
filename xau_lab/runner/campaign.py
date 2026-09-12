@@ -7,6 +7,7 @@ import os
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from typing import Iterable
 
 import numpy as np
 import polars as pl
@@ -172,6 +173,7 @@ def run_campaign(
     result_root: Path,
     workers: int | None = None,
     limit: int | None = None,
+    experiment_ids: Iterable[str] | None = None,
 ) -> None:
     catalog_path = Path(catalog_path)
     feature_path = Path(feature_path)
@@ -182,13 +184,30 @@ def run_campaign(
         raise ValueError("workers must be >= 1")
     if limit is not None and limit < 0:
         raise ValueError("limit must be >= 0")
+    if limit is not None and experiment_ids is not None:
+        raise ValueError("limit and experiment_ids cannot be used together")
 
     catalog = _read_catalog(catalog_path)
     catalog_ids = [item.experiment_id for item in catalog]
+    selected_ids: set[str] | None = None
+    if experiment_ids is not None:
+        requested = tuple(str(item) for item in experiment_ids)
+        if len(requested) != len(set(requested)):
+            raise ValueError("experiment_ids contains duplicates")
+        unknown = sorted(set(requested).difference(catalog_ids))
+        if unknown:
+            raise ValueError(f"experiment_ids contains IDs not present in catalog: {unknown[:5]}")
+        selected_ids = set(requested)
+
     checkpoint = CheckpointStore(result_root.parent / "state" / "CHECKPOINT.json")
     store = ResultStore(result_root, catalog_ids=catalog_ids, checkpoint=checkpoint)
     pending_set = set(store.pending_ids())
-    pending = [item for item in catalog if item.experiment_id in pending_set]
+    pending = [
+        item
+        for item in catalog
+        if item.experiment_id in pending_set
+        and (selected_ids is None or item.experiment_id in selected_ids)
+    ]
     if limit is not None:
         pending = pending[:limit]
     if not pending:
