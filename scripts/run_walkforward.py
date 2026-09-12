@@ -5,6 +5,7 @@ import csv
 from pathlib import Path
 
 from xau_lab.runner.campaign import _read_catalog, load_market_bundle
+from xau_lab.runner.manifest import verify_manifest_artifacts
 from xau_lab.validation.promotion import stage1_decision
 from xau_lab.validation.walkforward import validate_candidate, write_fold_results
 
@@ -29,7 +30,15 @@ def main() -> None:
         "--features", type=Path, default=Path("data/features/XAUUSD_M1_FEATURES.parquet")
     )
     parser.add_argument("--output", type=Path, default=Path("results/FOLD_RESULTS.csv"))
+    parser.add_argument(
+        "--run-manifest",
+        type=Path,
+        default=Path("results/RUN_MANIFEST.json"),
+        help="Discovery RUN_MANIFEST.json used to verify feature/catalog hashes",
+    )
     args = parser.parse_args()
+
+    verify_manifest_artifacts(args.run_manifest, args.features, args.catalog)
 
     master_rows = _read_master(args.master)
     promoted_ids = {
