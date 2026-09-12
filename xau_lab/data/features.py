@@ -3,6 +3,12 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
+from xau_lab.data.integrity import (
+    RESEARCH_START,
+    add_gap_provenance,
+    filter_research_window,
+    research_segments,
+)
 from xau_lab.data.schema import canonicalize_bar_frame
 from xau_lab.data.sessions import SessionConfig, add_session_features
 
@@ -168,18 +174,12 @@ def _efficiency_ratio(values: np.ndarray, window: int) -> np.ndarray:
     return out
 
 
-def build_shared_features(
-    frame: pl.DataFrame,
-    session_config: SessionConfig | None = None,
-) -> pl.DataFrame:
-    canonical = canonicalize_bar_frame(frame)
-    output = add_session_features(canonical, session_config) if session_config is not None else canonical
-
-    open_ = canonical.get_column("open").to_numpy().astype(np.float64, copy=False)
-    high = canonical.get_column("high").to_numpy().astype(np.float64, copy=False)
-    low = canonical.get_column("low").to_numpy().astype(np.float64, copy=False)
-    close = canonical.get_column("close").to_numpy().astype(np.float64, copy=False)
-
+def _compute_feature_arrays(
+    open_: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+) -> dict[str, np.ndarray]:
     features: dict[str, np.ndarray] = {}
 
     return_1 = np.full(close.shape, np.nan, dtype=np.float64)
@@ -244,8 +244,54 @@ def build_shared_features(
         features[f"regression_slope_{window}"] = _regression_slope(close, window)
         features[f"efficiency_ratio_{window}"] = _efficiency_ratio(close, window)
 
-    lagged_series = [
-        pl.Series(f"{name}_lag1", _shift_one(values), dtype=pl.Float64)
-        for name, values in features.items()
-    ]
+    return features
+
+
+def build_shared_features(
+    frame: pl.DataFrame,
+    session_config: SessionConfig | None = None,
+) -> pl.DataFrame:
+    canonical = canonicalize_bar_frame(frame)
+    output = add_gap_provenance(canonical)
+    if session_config is not None:
+        output = add_session_features(output, session_config)
+
+    open_ = canonical.get_column("open").to_numpy().astype(np.float64, copy=False)
+    high = canonical.get_column("high").to_numpy().astype(np.float64, copy=False)
+    low = canonical.get_column("low").to_numpy().astype(np.float64, copy=False)
+    close = canonical.get_column("close").to_numpy().astype(np.float64, copy=False)
+    irregular = output.get_column("is_irregular_gap_after").to_numpy()
+    segments = research_segments(irregular)
+
+    merged: dict[str, np.ndarray] = {}
+    for start, stop in segments:
+        segment = _compute_feature_arrays(
+            open_[start:stop],
+            high[start:stop],
+            low[start:stop],
+            close[start:stop],
+        )
+        if not merged:
+            merged = {
+                name: np.full(close.shape, np.nan, dtype=np.float64)
+                for name in segment
+            }
+        for name, values in segment.items():
+            merged[name][start:stop] = values
+
+    segment_starts = [start for start, _ in segments]
+    lagged_series: list[pl.Series] = []
+    for name, values in merged.items():
+        shifted = _shift_one(values)
+        for start in segment_starts:
+            shifted[start] = np.nan
+        lagged_series.append(pl.Series(f"{name}_lag1", shifted, dtype=pl.Float64))
+
     return output.with_columns(lagged_series)
+
+
+__all__ = [
+    "RESEARCH_START",
+    "build_shared_features",
+    "filter_research_window",
+]
