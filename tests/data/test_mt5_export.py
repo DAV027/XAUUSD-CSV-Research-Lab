@@ -84,14 +84,43 @@ class NoneAtCapProvider(FakeProvider):
         return super().copy_rates_from_pos(symbol, timeframe, start_pos, count)
 
 
-class ShortFinalChunkProvider(FakeProvider):
+class StableShortFinalChunkProvider(FakeProvider):
+    def __init__(self):
+        super().__init__()
+        self.calls: list[int] = []
+
+    def terminal_info(self):
+        return SimpleNamespace(maxbars=1000)
+
+    def last_error(self):
+        return (-1, "Terminal: Call failed")
+
+    def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
+        self.calls.append(start_pos)
+        if start_pos == 0:
+            return super().copy_rates_from_pos(symbol, timeframe, start_pos, count)
+        return None
+
+
+class GrowingShortChunkProvider(FakeProvider):
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
     def terminal_info(self):
         return SimpleNamespace(maxbars=1000)
 
     def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
-        if start_pos > 0:
-            raise AssertionError("exporter must stop after a short final chunk")
-        return super().copy_rates_from_pos(symbol, timeframe, start_pos, count)
+        assert start_pos == 0
+        self.calls += 1
+        base = super().copy_rates_from_pos(symbol, timeframe, start_pos, count)
+        if self.calls == 1:
+            return base
+        extra = np.array(
+            [(1767355320, 2002, 2004, 2001, 2003, 9, 33, 0)],
+            dtype=base.dtype,
+        )
+        return np.concatenate([base, extra])
 
 
 def test_export_writes_canonical_raw_csv_and_metadata(tmp_path):
@@ -177,9 +206,10 @@ def test_export_reports_cap_when_none_occurs_at_terminal_max_bars(tmp_path):
     assert not paths.metadata_json.exists()
 
 
-def test_export_stops_after_short_final_chunk_without_extra_probe(tmp_path):
-    provider = ShortFinalChunkProvider()
+def test_export_accepts_only_a_stable_short_final_chunk(tmp_path, monkeypatch):
+    provider = StableShortFinalChunkProvider()
     paths = DataPaths(tmp_path)
+    monkeypatch.setattr("xau_lab.data.mt5_export.time.sleep", lambda _: None)
 
     meta = export_all_m1(
         provider,
@@ -190,6 +220,27 @@ def test_export_stops_after_short_final_chunk_without_extra_probe(tmp_path):
     )
 
     assert meta.exported_rows == 2
+    assert provider.calls == [0, 0, 0, 2]
     assert provider.shutdown_called is True
     assert paths.raw_csv.exists()
     assert paths.metadata_json.exists()
+
+
+def test_export_rejects_short_chunk_when_history_is_still_changing(tmp_path, monkeypatch):
+    provider = GrowingShortChunkProvider()
+    paths = DataPaths(tmp_path)
+    monkeypatch.setattr("xau_lab.data.mt5_export.time.sleep", lambda _: None)
+
+    with pytest.raises(RuntimeError, match="history changed during short-chunk stability check"):
+        export_all_m1(
+            provider,
+            "XAUUSD",
+            paths,
+            server_timezone="Etc/UTC",
+            chunk_size=100_000,
+        )
+
+    assert provider.calls == 2
+    assert provider.shutdown_called is True
+    assert not paths.raw_csv.exists()
+    assert not paths.metadata_json.exists()
