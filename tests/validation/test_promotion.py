@@ -68,12 +68,26 @@ def test_top_five_profit_concentration_above_50_pct_fails():
     assert "top_five_profit_concentration_above_50_pct" in decision.reasons
 
 
+def test_missing_top_five_concentration_evidence_fails_closed():
+    decision = stage1_decision(BASE | {"top_5_trade_profit_fraction": None})
+    assert not decision.passed
+    assert "top_five_profit_concentration_missing" in decision.reasons
+
+
 def test_best_month_concentration_above_60_pct_fails_with_six_active_months():
     decision = stage1_decision(
         BASE | {"best_month_profit_fraction": 0.6001, "active_months": 6}
     )
     assert not decision.passed
     assert "best_month_profit_concentration_above_60_pct" in decision.reasons
+
+
+def test_missing_best_month_evidence_fails_closed_when_gate_applies():
+    decision = stage1_decision(
+        BASE | {"best_month_profit_fraction": None, "active_months": 6}
+    )
+    assert not decision.passed
+    assert "best_month_profit_concentration_missing" in decision.reasons
 
 
 def test_best_month_concentration_gate_is_not_applied_before_six_active_months():
