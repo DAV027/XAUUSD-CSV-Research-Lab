@@ -84,6 +84,16 @@ class NoneAtCapProvider(FakeProvider):
         return super().copy_rates_from_pos(symbol, timeframe, start_pos, count)
 
 
+class ShortFinalChunkProvider(FakeProvider):
+    def terminal_info(self):
+        return SimpleNamespace(maxbars=1000)
+
+    def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
+        if start_pos > 0:
+            raise AssertionError("exporter must stop after a short final chunk")
+        return super().copy_rates_from_pos(symbol, timeframe, start_pos, count)
+
+
 def test_export_writes_canonical_raw_csv_and_metadata(tmp_path):
     provider = FakeProvider()
     paths = DataPaths(tmp_path)
@@ -165,3 +175,21 @@ def test_export_reports_cap_when_none_occurs_at_terminal_max_bars(tmp_path):
     assert provider.shutdown_called is True
     assert not paths.raw_csv.exists()
     assert not paths.metadata_json.exists()
+
+
+def test_export_stops_after_short_final_chunk_without_extra_probe(tmp_path):
+    provider = ShortFinalChunkProvider()
+    paths = DataPaths(tmp_path)
+
+    meta = export_all_m1(
+        provider,
+        "XAUUSD",
+        paths,
+        server_timezone="Etc/UTC",
+        chunk_size=100_000,
+    )
+
+    assert meta.exported_rows == 2
+    assert provider.shutdown_called is True
+    assert paths.raw_csv.exists()
+    assert paths.metadata_json.exists()
