@@ -67,6 +67,7 @@ def test_trade_summary_covers_required_daily_temporal_side_and_concentration_met
     assert out["median_profit_per_active_day"] == 7.5
     assert out["positive_year_fraction"] == 1.0
     assert out["positive_month_fraction"] == 1.0
+    assert out["active_months"] == 2
     assert out["worst_month"] == 5.0
     assert out["long_PF"] == 3.0
     assert out["short_PF"] == 0.0
