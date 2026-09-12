@@ -84,6 +84,11 @@ def test_create_catalog_and_run_smoke_produce_exact_unique_count_and_manifest(tm
         "--output",
         str(catalog_path),
     )
+    with catalog_path.open(newline="", encoding="utf-8") as handle:
+        catalog_rows = list(csv.DictReader(handle))
+    bucket_by_id = {row["experiment_id"]: row["allocation_bucket"] for row in catalog_rows}
+    all_buckets = {row["allocation_bucket"] for row in catalog_rows}
+
     smoke_args = (
         "scripts/run_smoke.py",
         "--catalog",
@@ -111,6 +116,7 @@ def test_create_catalog_and_run_smoke_produce_exact_unique_count_and_manifest(tm
     ids = [row["experiment_id"] for row in rows]
     assert len(ids) == 10
     assert len(set(ids)) == 10
+    assert {bucket_by_id[experiment_id] for experiment_id in ids} == all_buckets
 
     manifest = json.loads((result_root / "RUN_MANIFEST.json").read_text(encoding="utf-8"))
     assert manifest["source_data_path"] == str(feature_path.resolve())
