@@ -84,7 +84,7 @@ def test_create_catalog_and_run_smoke_produce_exact_unique_count_and_manifest(tm
         "--output",
         str(catalog_path),
     )
-    smoke = _run(
+    smoke_args = (
         "scripts/run_smoke.py",
         "--catalog",
         str(catalog_path),
@@ -99,7 +99,12 @@ def test_create_catalog_and_run_smoke_produce_exact_unique_count_and_manifest(tm
         "--seed",
         "9215000",
     )
+    smoke = _run(*smoke_args)
     assert "10" in smoke.stdout
+
+    # A resumed smoke targets the same fixed experiment IDs. It must not execute
+    # another ten pending rows and silently turn a ten-experiment smoke into 20.
+    _run(*smoke_args)
 
     with (result_root / "MASTER_RESULTS.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
