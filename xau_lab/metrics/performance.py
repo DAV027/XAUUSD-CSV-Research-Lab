@@ -97,6 +97,7 @@ def summarize_trades(trades: Iterable[Trade], starting_equity: float) -> dict[st
     out["positive_month_fraction"] = (
         sum(value > 0 for value in monthly.values()) / len(monthly) if monthly else None
     )
+    out["active_months"] = len(monthly)
     out["worst_month"] = float(min(monthly.values())) if monthly else None
 
     long_values = [float(trade.net_pnl) for trade in trade_list if trade.direction == 1]
