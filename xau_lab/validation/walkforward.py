@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import csv
+import os
 from collections import defaultdict
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from statistics import median
 from typing import Iterable
 
@@ -11,6 +14,21 @@ from xau_lab.backtest.models import MarketBars
 from xau_lab.experiments.spec import CompleteExperiment
 from xau_lab.runner.single import ExperimentOutcome, MarketBundle, run_experiment
 from xau_lab.validation.folds import ValidationFold, expanding_folds, rolling_folds
+
+FOLD_RESULT_FIELDS = (
+    "experiment_id",
+    "scheme",
+    "fold_id",
+    "segment",
+    "start",
+    "end",
+    "trades",
+    "pf",
+    "expectancy_usd",
+    "net_profit",
+    "max_drawdown_pct",
+    "positive_day_fraction",
+)
 
 
 @dataclass(frozen=True)
@@ -125,6 +143,21 @@ def validate_candidate(
     return results
 
 
+def write_fold_results(path: str | Path, results: Iterable[FoldResult]) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    tmp = output.with_name(output.name + ".tmp")
+    rows = list(results)
+    with tmp.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FOLD_RESULT_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row.to_dict())
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, output)
+
+
 def _median_numeric(values: Iterable[float | None]) -> float | None:
     numeric = [float(value) for value in values if value is not None]
     return float(median(numeric)) if numeric else None
@@ -173,4 +206,10 @@ def summarize_fold_results(results: Iterable[FoldResult]) -> dict[str, float | i
     }
 
 
-__all__ = ["FoldResult", "summarize_fold_results", "validate_candidate"]
+__all__ = [
+    "FOLD_RESULT_FIELDS",
+    "FoldResult",
+    "summarize_fold_results",
+    "validate_candidate",
+    "write_fold_results",
+]
