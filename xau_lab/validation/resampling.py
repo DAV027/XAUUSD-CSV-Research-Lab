@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from collections.abc import Mapping
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -33,7 +35,13 @@ def bootstrap_days(
     daily_pnl: Iterable[float],
     n: int = DEFAULT_RESAMPLES,
     seed: int = RESAMPLING_SEED,
-) -> dict[str, float | int]:
+) -> dict[str, object]:
+    """Bootstrap an already aggregated daily P/L path.
+
+    `block_bootstrap_daily` is the canonical ledger-facing interface. This
+    lower-level helper remains available for callers that already hold daily
+    aggregates.
+    """
     values = _values(daily_pnl)
     n = _validate_n(n)
     rng = np.random.default_rng(int(seed))
@@ -47,6 +55,7 @@ def bootstrap_days(
         "seed": int(seed),
         "n": n,
         "days_per_sample": len(values),
+        "source_daily_pnl": [float(value) for value in values],
         "mean_daily_p5": mean_p5,
         "mean_daily_p50": mean_p50,
         "mean_daily_p95": mean_p95,
@@ -54,6 +63,44 @@ def bootstrap_days(
         "total_pnl_p50": total_p50,
         "total_pnl_p95": total_p95,
     }
+
+
+def _trade_value(trade: object, field: str) -> object:
+    if isinstance(trade, Mapping):
+        if field not in trade:
+            raise ValueError(f"trade is missing required field {field!r}")
+        return trade[field]
+    if not hasattr(trade, field):
+        raise ValueError(f"trade is missing required field {field!r}")
+    return getattr(trade, field)
+
+
+def block_bootstrap_daily(
+    trades: Iterable[object],
+    n: int = DEFAULT_RESAMPLES,
+    seed: int = RESAMPLING_SEED,
+) -> dict[str, object]:
+    """Aggregate net P/L by broker date, then resample whole days.
+
+    Whole-day blocks preserve dependence among trades that happened on the same
+    broker date; individual trades are never resampled independently here.
+    """
+    daily: dict[str, float] = defaultdict(float)
+    count = 0
+    for trade in trades:
+        broker_date = str(_trade_value(trade, "broker_date"))
+        net_pnl = float(_trade_value(trade, "net_pnl"))
+        if not np.isfinite(net_pnl):
+            raise ValueError("trade net_pnl must be finite")
+        daily[broker_date] += net_pnl
+        count += 1
+    if count == 0:
+        raise ValueError("resampling input must contain at least one trade")
+    ordered_daily = [daily[key] for key in sorted(daily)]
+    result = bootstrap_days(ordered_daily, n=n, seed=seed)
+    result["trade_count"] = count
+    result["source_broker_dates"] = sorted(daily)
+    return result
 
 
 def _max_drawdown(sequence: np.ndarray) -> float:
@@ -67,11 +114,12 @@ def _max_drawdown(sequence: np.ndarray) -> float:
     return float(max_drawdown)
 
 
-def shuffle_trade_order(
+def trade_order_monte_carlo(
     trade_pnl: Iterable[float],
     n: int = DEFAULT_RESAMPLES,
     seed: int = RESAMPLING_SEED,
 ) -> dict[str, float | int | str]:
+    """Shuffle trade order only to estimate drawdown sequence sensitivity."""
     values = _values(trade_pnl)
     n = _validate_n(n)
     rng = np.random.default_rng(int(seed))
@@ -91,30 +139,73 @@ def shuffle_trade_order(
     }
 
 
+def shuffle_trade_order(
+    trade_pnl: Iterable[float],
+    n: int = DEFAULT_RESAMPLES,
+    seed: int = RESAMPLING_SEED,
+) -> dict[str, float | int | str]:
+    """Backward-compatible alias for `trade_order_monte_carlo`."""
+    return trade_order_monte_carlo(trade_pnl, n=n, seed=seed)
+
+
+def _profit_factor(values: np.ndarray) -> float | None:
+    gross_profit = float(values[values > 0.0].sum())
+    gross_loss = float(values[values < 0.0].sum())
+    if gross_loss == 0.0:
+        return None
+    return float(gross_profit / abs(gross_loss))
+
+
+def _relative_sensitivity_pct(baseline: float | None, stressed: float | None) -> float | None:
+    if baseline is None or stressed is None or baseline == 0.0:
+        return None
+    return float((baseline - stressed) / abs(baseline) * 100.0)
+
+
 def top_trade_removal(
     trade_pnl: Iterable[float],
     counts: Sequence[int] = (1, 5, 10),
 ) -> dict[str, object]:
+    """Remove only the largest profitable trades and recompute net/PF evidence."""
     values = _values(trade_pnl)
-    baseline = float(values.sum())
-    ordered = np.sort(values)[::-1]
+    baseline_net = float(values.sum())
+    baseline_pf = _profit_factor(values)
+    positive_indices = [int(i) for i in np.where(values > 0.0)[0]]
+    positive_indices.sort(key=lambda i: (-float(values[i]), i))
+
     scenarios: list[dict[str, object]] = []
     for requested in counts:
         if int(requested) != requested or requested <= 0:
             raise ValueError("removal counts must be positive integers")
-        removed = min(int(requested), len(ordered))
-        remaining = float(baseline - ordered[:removed].sum())
+        requested = int(requested)
+        removed_indices = positive_indices[:requested]
+        keep = np.ones(len(values), dtype=bool)
+        if removed_indices:
+            keep[np.asarray(removed_indices, dtype=np.int64)] = False
+        remaining_values = values[keep]
+        remaining_net = float(remaining_values.sum())
+        remaining_pf = _profit_factor(remaining_values)
         scenarios.append(
             {
-                "requested_count": int(requested),
-                "removed_count": removed,
-                "net_profit": remaining,
-                "turns_negative": bool(baseline >= 0.0 and remaining < 0.0),
+                "requested_count": requested,
+                "removed_count": len(removed_indices),
+                "removed_profit": float(values[removed_indices].sum()) if removed_indices else 0.0,
+                "net_profit": remaining_net,
+                "profit_factor": remaining_pf,
+                "net_profit_sensitivity_pct": _relative_sensitivity_pct(
+                    baseline_net, remaining_net
+                ),
+                "profit_factor_sensitivity_pct": _relative_sensitivity_pct(
+                    baseline_pf, remaining_pf
+                ),
+                "turns_negative": bool(baseline_net >= 0.0 and remaining_net < 0.0),
             }
         )
     return {
-        "baseline_net_profit": baseline,
+        "baseline_net_profit": baseline_net,
+        "baseline_profit_factor": baseline_pf,
         "trade_count": len(values),
+        "profitable_trade_count": len(positive_indices),
         "scenarios": scenarios,
     }
 
@@ -123,7 +214,9 @@ __all__ = [
     "DEFAULT_RESAMPLES",
     "RESAMPLING_SEED",
     "SEQUENCE_ONLY_LABEL",
+    "block_bootstrap_daily",
     "bootstrap_days",
     "shuffle_trade_order",
     "top_trade_removal",
+    "trade_order_monte_carlo",
 ]
