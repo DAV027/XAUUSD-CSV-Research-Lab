@@ -16,7 +16,10 @@ def _regime_signal(ctx: StrategyContext, params: dict) -> np.ndarray:
     out = np.zeros(len(ctx), dtype=np.int8)
     for i, epoch in enumerate(ctx.time_epoch):
         year = datetime.fromtimestamp(int(epoch), tz=timezone.utc).year
-        out[i] = 1 if year == 2023 else -1
+        if year == 2023:
+            out[i] = -1 if i % 5 == 0 else 1
+        else:
+            out[i] = -1
     return out
 
 
@@ -110,6 +113,7 @@ def test_validation_reports_regime_degradation_instead_of_hiding_it_in_full_hist
     assert validation.start == "2024-01"
     assert validation.end == "2024-03"
     assert research.net_profit > 0.0
+    assert research.pf is not None
     assert validation.net_profit < 0.0
     assert validation.expectancy_usd is not None and validation.expectancy_usd < 0.0
 
