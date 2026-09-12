@@ -76,7 +76,9 @@ def build_robustness_evidence(
         for row in (*expanding_results, *rolling_results)
         if row.segment == "validation" and row.pf is not None
     ]
-    combined_median_pf = float(median(validation_pfs)) if validation_pfs else None
+    combined_median_pf = (
+        float(round(median(validation_pfs), 12)) if validation_pfs else None
+    )
 
     bootstrap = block_bootstrap_daily(trades, n=resample_n, seed=seed)
     pnl = [float(trade.net_pnl) for trade in trades]
