@@ -6,7 +6,7 @@ from pathlib import Path
 
 import polars as pl
 
-from xau_lab.data.features import build_shared_features
+from xau_lab.data.features import build_shared_features, filter_research_window
 from xau_lab.data.schema import DataPaths
 from xau_lab.data.sessions import SessionConfig
 
@@ -26,7 +26,7 @@ def main() -> None:
         payload = json.loads(args.session_config.read_text(encoding="utf-8"))
         session_config = SessionConfig(**payload)
 
-    clean = pl.read_csv(paths.clean_csv, try_parse_dates=False)
+    clean = filter_research_window(pl.read_csv(paths.clean_csv, try_parse_dates=False))
     features = build_shared_features(clean, session_config=session_config)
 
     paths.features_parquet.parent.mkdir(parents=True, exist_ok=True)
