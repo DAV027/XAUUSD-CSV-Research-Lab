@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import time as stdlib_time
 
 import numpy as np
 import polars as pl
@@ -209,7 +210,7 @@ def test_export_reports_cap_when_none_occurs_at_terminal_max_bars(tmp_path):
 def test_export_accepts_only_a_stable_short_final_chunk(tmp_path, monkeypatch):
     provider = StableShortFinalChunkProvider()
     paths = DataPaths(tmp_path)
-    monkeypatch.setattr("xau_lab.data.mt5_export.time.sleep", lambda _: None)
+    monkeypatch.setattr(stdlib_time, "sleep", lambda _: None)
 
     meta = export_all_m1(
         provider,
@@ -229,7 +230,7 @@ def test_export_accepts_only_a_stable_short_final_chunk(tmp_path, monkeypatch):
 def test_export_rejects_short_chunk_when_history_is_still_changing(tmp_path, monkeypatch):
     provider = GrowingShortChunkProvider()
     paths = DataPaths(tmp_path)
-    monkeypatch.setattr("xau_lab.data.mt5_export.time.sleep", lambda _: None)
+    monkeypatch.setattr(stdlib_time, "sleep", lambda _: None)
 
     with pytest.raises(RuntimeError, match="history changed during short-chunk stability check"):
         export_all_m1(
