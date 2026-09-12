@@ -71,6 +71,8 @@ def test_trade_summary_covers_required_daily_temporal_side_and_concentration_met
     assert out["worst_month"] == 5.0
     assert out["long_PF"] == 3.0
     assert out["short_PF"] == 0.0
+    assert out["long_trades"] == 3
+    assert out["short_trades"] == 1
     assert out["trades_per_active_day"] == 2.0
     assert out["median_hold_minutes"] == 25.0
     assert out["top_5_trade_profit_fraction"] == 1.0
@@ -82,3 +84,5 @@ def test_undefined_profit_factor_and_empty_side_metrics_are_null_not_zero():
     assert out["profit_factor"] is None
     assert out["long_PF"] is None
     assert out["short_PF"] is None
+    assert out["long_trades"] == 1
+    assert out["short_trades"] == 0
