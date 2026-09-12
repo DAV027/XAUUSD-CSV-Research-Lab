@@ -5,6 +5,15 @@ import polars as pl
 from xau_lab.data.features import build_shared_features
 
 
+_PROVENANCE_COLUMNS = {
+    "gap_seconds",
+    "is_gap_after",
+    "is_scheduled_break_after",
+    "is_irregular_gap_after",
+    "entry_allowed",
+}
+
+
 def test_rolling_features_are_shifted_one_completed_bar():
     frame = pl.DataFrame({
         "time": [f"2026-01-05 10:0{i}:00" for i in range(6)],
@@ -38,8 +47,11 @@ def test_signal_facing_shared_features_are_named_lag1():
 
     out = build_shared_features(frame)
     raw = {"time", "open", "high", "low", "close", "tick_volume", "spread", "real_volume"}
-    feature_columns = [name for name in out.columns if name not in raw]
+    feature_columns = [
+        name for name in out.columns if name not in raw and name not in _PROVENANCE_COLUMNS
+    ]
 
     assert feature_columns
     assert all(name.endswith("_lag1") for name in feature_columns)
     assert math.isfinite(out["return_1_lag1"][2])
+    assert _PROVENANCE_COLUMNS.issubset(out.columns)
