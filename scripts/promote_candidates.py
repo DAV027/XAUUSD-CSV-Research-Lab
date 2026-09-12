@@ -5,6 +5,7 @@ import csv
 from pathlib import Path
 
 from xau_lab.runner.campaign import _read_catalog, load_market_bundle
+from xau_lab.runner.manifest import verify_manifest_artifacts
 from xau_lab.runner.single import run_experiment
 from xau_lab.validation.promotion import stage1_decision
 from xau_lab.validation.reporting import (
@@ -41,12 +42,21 @@ def main() -> None:
         "--features", type=Path, default=Path("data/features/XAUUSD_M1_FEATURES.parquet")
     )
     parser.add_argument("--result-root", type=Path, default=Path("results"))
+    parser.add_argument(
+        "--run-manifest",
+        type=Path,
+        default=None,
+        help="Discovery RUN_MANIFEST.json; defaults to <result-root>/RUN_MANIFEST.json",
+    )
     parser.add_argument("--resamples", type=int, default=DEFAULT_RESAMPLES)
     parser.add_argument("--seed", type=int, default=RESAMPLING_SEED)
     args = parser.parse_args()
 
     if args.resamples <= 0:
         raise ValueError("--resamples must be positive")
+
+    manifest_path = args.run_manifest or (args.result_root / "RUN_MANIFEST.json")
+    verify_manifest_artifacts(manifest_path, args.features, args.catalog)
 
     master_rows = _read_master(args.master)
     if not master_rows:
