@@ -5,7 +5,11 @@ import json
 from pathlib import Path
 
 from xau_lab.runner.campaign import run_campaign
-from xau_lab.runner.manifest import build_run_manifest, resolved_workers, write_run_manifest
+from xau_lab.runner.manifest import (
+    build_run_manifest,
+    resolved_workers,
+    write_or_validate_run_manifest,
+)
 
 
 def _guard_slow_campaign(result_root: Path, allow_slow: bool) -> None:
@@ -40,7 +44,7 @@ def main() -> None:
         campaign_seed=args.seed,
         repo_root=Path(__file__).resolve().parents[1],
     )
-    write_run_manifest(args.result_root, manifest)
+    write_or_validate_run_manifest(args.result_root, manifest)
     run_campaign(
         args.catalog,
         args.features,

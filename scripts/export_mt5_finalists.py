@@ -7,7 +7,7 @@ from pathlib import Path
 
 from xau_lab.io.finalist import export_finalist_package
 from xau_lab.runner.campaign import _read_catalog, load_market_bundle
-from xau_lab.runner.manifest import sha256_file
+from xau_lab.runner.manifest import verify_manifest_artifacts
 from xau_lab.runner.single import run_experiment
 from xau_lab.validation.holdout import HoldoutRecord, freeze_holdout, load_holdout_registry
 
@@ -44,6 +44,12 @@ def main() -> None:
     parser.add_argument(
         "--features", type=Path, default=Path("data/features/XAUUSD_M1_FEATURES.parquet")
     )
+    parser.add_argument(
+        "--run-manifest",
+        type=Path,
+        default=Path("results/RUN_MANIFEST.json"),
+        help="Discovery RUN_MANIFEST.json used to verify feature/catalog hashes",
+    )
     parser.add_argument("--registry", type=Path, default=Path("state/HOLDOUT_REGISTRY.json"))
     parser.add_argument("--output-root", type=Path, default=Path("results/finalists"))
     parser.add_argument(
@@ -58,6 +64,9 @@ def main() -> None:
     except ValueError as exc:
         raise ValueError("--prospective-start must be YYYY-MM-DD") from exc
 
+    manifest = verify_manifest_artifacts(args.run_manifest, args.features, args.catalog)
+    source_sha = str(manifest["source_data_sha256"])
+
     top_rows = _read_rows(args.top_candidates)
     finalist_rows = [row for row in top_rows if row.get("verdict") == "ROBUST_CANDIDATE"]
     if len(finalist_rows) != len(top_rows):
@@ -67,7 +76,6 @@ def main() -> None:
     catalog = _read_catalog(args.catalog)
     experiments = {experiment.experiment_id: experiment for experiment in catalog}
     market = load_market_bundle(args.features)
-    source_sha = sha256_file(args.features)
 
     missing_master = sorted(str(row["experiment_id"]) for row in finalist_rows if str(row["experiment_id"]) not in master_by_id)
     missing_catalog = sorted(str(row["experiment_id"]) for row in finalist_rows if str(row["experiment_id"]) not in experiments)

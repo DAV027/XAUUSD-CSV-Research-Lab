@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import replace
 
 import pytest
 
@@ -80,6 +79,16 @@ def _holdout(**overrides) -> HoldoutRecord:
     return HoldoutRecord(**(base | overrides))
 
 
+def _robustness() -> dict[str, object]:
+    return {
+        "verdict": "ROBUST_CANDIDATE",
+        "final_score": 72.5,
+        "median_validation_pf": 1.12,
+        "parameter_stability_pct": 80.0,
+        "cost_stability_pct": 70.0,
+    }
+
+
 def test_holdout_registry_freezes_required_fields_and_only_observed_through_can_advance(tmp_path):
     registry = tmp_path / "state" / "HOLDOUT_REGISTRY.json"
     first = freeze_holdout(registry, _holdout())
@@ -94,12 +103,35 @@ def test_holdout_registry_freezes_required_fields_and_only_observed_through_can_
     assert persisted["candidates"]["EXP_FINAL"]["observed_through"] == "2026-09-30"
 
 
+def test_new_holdout_must_start_strictly_after_its_freeze_date():
+    with pytest.raises(ValueError, match="strictly after freeze"):
+        _holdout(prospective_start="2026-09-12")
+    with pytest.raises(ValueError, match="strictly after freeze"):
+        _holdout(prospective_start="2026-09-11")
+
+
+def test_holdout_requires_timezone_aware_freeze_timestamp():
+    with pytest.raises(ValueError, match="freeze_timestamp"):
+        _holdout(freeze_timestamp="2026-09-12T06:00:00")
+
+
 def test_holdout_cannot_move_prospective_start_backward_or_change_frozen_identity(tmp_path):
     registry = tmp_path / "HOLDOUT_REGISTRY.json"
     freeze_holdout(registry, _holdout())
 
     with pytest.raises(ValueError, match="prospective_start"):
-        freeze_holdout(registry, _holdout(prospective_start="2026-09-12"))
+        freeze_holdout(
+            registry,
+            HoldoutRecord(
+                experiment_id="EXP_FINAL",
+                freeze_timestamp="2026-09-12T05:00:00Z",
+                source_data_sha256="a" * 64,
+                parameter_fingerprint="fingerprint-final",
+                prospective_start="2026-09-12",
+                planned_months=3,
+                status="frozen",
+            ),
+        )
 
     with pytest.raises(ValueError, match="immutable"):
         freeze_holdout(registry, _holdout(source_data_sha256="b" * 64))
@@ -108,15 +140,29 @@ def test_holdout_cannot_move_prospective_start_backward_or_change_frozen_identit
         update_observed_through(registry, "EXP_FINAL", "2026-09-01")
 
 
+def test_finalist_package_rejects_holdout_identity_or_source_mismatch(tmp_path):
+    discovery = {"profit_factor": 1.24, "completed_trades": 800, "net_profit": 120.0}
+    bad_holdouts = [
+        _holdout(experiment_id="OTHER").to_dict(),
+        _holdout(parameter_fingerprint="other-fingerprint").to_dict(),
+        _holdout(source_data_sha256="b" * 64).to_dict(),
+    ]
+    for holdout in bad_holdouts:
+        with pytest.raises(ValueError, match="holdout"):
+            export_finalist_package(
+                tmp_path / "results" / "finalists",
+                _experiment(),
+                discovery_metrics=discovery,
+                robustness_metrics=_robustness(),
+                source_data_sha256="a" * 64,
+                trades=(_trade(),),
+                holdout_record=holdout,
+            )
+
+
 def test_finalist_package_contains_exact_mt5_handoff_and_never_claims_tick_validation(tmp_path):
     discovery = {"profit_factor": 1.24, "completed_trades": 800, "net_profit": 120.0}
-    robustness = {
-        "verdict": "ROBUST_CANDIDATE",
-        "final_score": 72.5,
-        "median_validation_pf": 1.12,
-        "parameter_stability_pct": 80.0,
-        "cost_stability_pct": 70.0,
-    }
+    robustness = _robustness()
     package = export_finalist_package(
         tmp_path / "results" / "finalists",
         _experiment(),
