@@ -90,6 +90,12 @@ def test_missing_best_month_evidence_fails_closed_when_gate_applies():
     assert "best_month_profit_concentration_missing" in decision.reasons
 
 
+def test_missing_active_month_count_fails_closed():
+    decision = stage1_decision(BASE | {"active_months": None})
+    assert not decision.passed
+    assert "active_months_missing" in decision.reasons
+
+
 def test_best_month_concentration_gate_is_not_applied_before_six_active_months():
     decision = stage1_decision(
         BASE | {"best_month_profit_fraction": 0.95, "active_months": 5}
