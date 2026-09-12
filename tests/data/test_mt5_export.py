@@ -58,6 +58,32 @@ class CappedHistoryProvider(FakeProvider):
         return SimpleNamespace(maxbars=3)
 
 
+class NoneAtNaturalEndProvider(FakeProvider):
+    def terminal_info(self):
+        return SimpleNamespace(maxbars=1000)
+
+    def last_error(self):
+        return (-4, "No history")
+
+    def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
+        if start_pos > 0:
+            return None
+        return super().copy_rates_from_pos(symbol, timeframe, start_pos, count)
+
+
+class NoneAtCapProvider(FakeProvider):
+    def terminal_info(self):
+        return SimpleNamespace(maxbars=2)
+
+    def last_error(self):
+        return (-4, "No history")
+
+    def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
+        if start_pos > 0:
+            return None
+        return super().copy_rates_from_pos(symbol, timeframe, start_pos, count)
+
+
 def test_export_writes_canonical_raw_csv_and_metadata(tmp_path):
     provider = FakeProvider()
     paths = DataPaths(tmp_path)
@@ -99,6 +125,42 @@ def test_export_rejects_history_pinned_to_terminal_max_bars(tmp_path):
 
     with pytest.raises(RuntimeError, match="Max bars in chart"):
         export_all_m1(provider, "XAUUSD", paths, server_timezone="Etc/UTC")
+
+    assert provider.shutdown_called is True
+    assert not paths.raw_csv.exists()
+    assert not paths.metadata_json.exists()
+
+
+def test_export_treats_not_found_after_data_as_natural_history_end(tmp_path):
+    provider = NoneAtNaturalEndProvider()
+    paths = DataPaths(tmp_path)
+
+    meta = export_all_m1(
+        provider,
+        "XAUUSD",
+        paths,
+        server_timezone="Etc/UTC",
+        chunk_size=2,
+    )
+
+    assert meta.exported_rows == 2
+    assert provider.shutdown_called is True
+    assert paths.raw_csv.exists()
+    assert paths.metadata_json.exists()
+
+
+def test_export_reports_cap_when_none_occurs_at_terminal_max_bars(tmp_path):
+    provider = NoneAtCapProvider()
+    paths = DataPaths(tmp_path)
+
+    with pytest.raises(RuntimeError, match="Max bars in chart"):
+        export_all_m1(
+            provider,
+            "XAUUSD",
+            paths,
+            server_timezone="Etc/UTC",
+            chunk_size=2,
+        )
 
     assert provider.shutdown_called is True
     assert not paths.raw_csv.exists()
