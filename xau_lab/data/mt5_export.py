@@ -48,6 +48,21 @@ def _terminal_maxbars(provider) -> int | None:
     return maxbars if maxbars > 0 else None
 
 
+def _provider_last_error(provider) -> tuple[int, str] | None:
+    last_error = getattr(provider, "last_error", None)
+    if not callable(last_error):
+        return None
+    value = last_error()
+    if not isinstance(value, tuple) or not value:
+        return None
+    try:
+        code = int(value[0])
+    except (TypeError, ValueError):
+        return None
+    message = str(value[1]) if len(value) > 1 else ""
+    return code, message
+
+
 def export_all_m1(
     provider,
     symbol: str,
@@ -89,13 +104,25 @@ def export_all_m1(
         while True:
             rates = provider.copy_rates_from_pos(symbol, timeframe, start_pos, chunk_size)
             if rates is None:
+                error = _provider_last_error(provider)
+                error_detail = f"; last_error={error}" if error is not None else ""
+                if maxbars is not None and start_pos >= maxbars:
+                    raise RuntimeError(
+                        f"MT5 reached terminal Max bars in chart ({maxbars}) for {symbol} at "
+                        f"start_pos={start_pos}; history may be capped. Increase the terminal "
+                        f"'Max bars in chart' setting, reload history, and re-export before research"
+                        f"{error_detail}"
+                    )
+                if error is not None and error[0] == -4:
+                    break
                 raise RuntimeError(
                     f"MT5 copy_rates_from_pos failed for {symbol} at start_pos={start_pos}"
+                    f"{error_detail}"
                 )
             if len(rates) == 0:
                 break
             chunks.append(_rates_to_frame(rates))
-            start_pos += chunk_size
+            start_pos += len(rates)
 
         if not chunks:
             raise RuntimeError(f"MT5 returned no M1 history for {symbol}")
