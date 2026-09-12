@@ -33,6 +33,21 @@ def _format_server_time(frame: pl.DataFrame, server_timezone: str) -> pl.DataFra
     )
 
 
+def _terminal_maxbars(provider) -> int | None:
+    terminal_info = getattr(provider, "terminal_info", None)
+    if not callable(terminal_info):
+        return None
+    info = terminal_info()
+    if info is None:
+        return None
+    value = getattr(info, "maxbars", None)
+    try:
+        maxbars = int(value)
+    except (TypeError, ValueError):
+        return None
+    return maxbars if maxbars > 0 else None
+
+
 def export_all_m1(
     provider,
     symbol: str,
@@ -68,6 +83,7 @@ def export_all_m1(
         if info is None:
             raise RuntimeError(f"MT5 symbol_info returned no metadata for {symbol}")
 
+        maxbars = _terminal_maxbars(provider)
         start_pos = 0
         timeframe = provider.TIMEFRAME_M1
         while True:
@@ -88,6 +104,13 @@ def export_all_m1(
         frame = frame.sort("time", maintain_order=True).unique(
             subset=["time"], keep="last", maintain_order=True
         )
+        if maxbars is not None and frame.height >= maxbars - 1:
+            raise RuntimeError(
+                f"MT5 returned {frame.height} M1 bars while terminal Max bars in chart is {maxbars}; "
+                "history may be capped. Increase the terminal 'Max bars in chart' setting, reload "
+                "history, and re-export before research."
+            )
+
         frame = _format_server_time(frame, server_timezone)
         frame = canonicalize_bar_frame(frame)
 
