@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import csv
+
+from xau_lab.backtest.models import Trade
 from xau_lab.validation.reporting import (
     RESEARCH_ONLY_SCOPE,
     classify_candidates,
     robust_candidate_decision,
+    write_candidate_tables,
+    write_promoted_trade_logs,
 )
 
 
@@ -41,6 +46,36 @@ def _robust(**overrides):
         top_five_removal_net_profit=8.0,
     )
     return base | overrides
+
+
+def _trade(experiment_id: str) -> Trade:
+    return Trade(
+        experiment_id=experiment_id,
+        parameter_set_id="p",
+        fingerprint="f",
+        signal_time=1,
+        entry_time=2,
+        direction=1,
+        signal_price=2000.0,
+        entry_price=2000.1,
+        stop_price=1999.1,
+        target_price=None,
+        exit_time=62,
+        exit_price=2000.5,
+        exit_reason="time",
+        lot_size=0.01,
+        planned_risk_usd=1.0,
+        risk_R=1.0,
+        gross_pnl=0.4,
+        spread_cost=0.1,
+        commission=0.06,
+        slippage_cost=0.02,
+        net_pnl=0.22,
+        pnl_R=0.22,
+        hold_minutes=1.0,
+        broker_date="2026-01-02",
+        broker_timezone="UTC",
+    )
 
 
 def test_three_candidate_classes_land_in_exactly_one_output_table_each():
@@ -125,3 +160,46 @@ def test_robust_candidate_has_completed_final_score_and_all_components():
         "side_dependence_penalty",
     ):
         assert field in row
+
+
+def test_reporting_writes_canonical_tables_and_only_promoted_trade_logs(tmp_path):
+    master_rows = [
+        _master("reject", profit_factor=1.05),
+        _master("survivor"),
+        _master("robust"),
+    ]
+    tables = classify_candidates(
+        master_rows,
+        {
+            "survivor": _robust(parameter_stability_pct=40.0),
+            "robust": _robust(),
+        },
+    )
+
+    write_candidate_tables(tmp_path, tables)
+    for name in ("REJECTED.csv", "SURVIVORS.csv", "TOP_CANDIDATES.csv"):
+        assert (tmp_path / name).is_file()
+
+    with (tmp_path / "TOP_CANDIDATES.csv").open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["experiment_id"] == "robust"
+    assert rows[0]["verdict"] == "ROBUST_CANDIDATE"
+
+    write_promoted_trade_logs(
+        tmp_path,
+        tables,
+        {
+            "reject": (_trade("reject"),),
+            "survivor": (_trade("survivor"),),
+            "robust": (_trade("robust"),),
+        },
+    )
+    log_root = tmp_path / "trade_logs"
+    assert not (log_root / "reject.csv").exists()
+    assert (log_root / "survivor.csv").is_file()
+    assert (log_root / "robust.csv").is_file()
+
+    with (log_root / "robust.csv").open(encoding="utf-8", newline="") as handle:
+        trade_rows = list(csv.DictReader(handle))
+    assert trade_rows[0]["experiment_id"] == "robust"
+    assert trade_rows[0]["net_pnl"] == "0.22"
