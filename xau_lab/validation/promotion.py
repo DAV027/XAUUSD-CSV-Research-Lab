@@ -61,7 +61,9 @@ def stage1_decision(
 
     best_month = _number(metrics, "best_month_profit_fraction")
     active_months = _number(metrics, "active_months")
-    if active_months is not None and active_months >= BEST_MONTH_MIN_ACTIVE_MONTHS:
+    if active_months is None:
+        reasons.append("active_months_missing")
+    elif active_months >= BEST_MONTH_MIN_ACTIVE_MONTHS:
         if best_month is None:
             reasons.append("best_month_profit_concentration_missing")
         elif best_month > BEST_MONTH_PROFIT_FRACTION_MAX:
