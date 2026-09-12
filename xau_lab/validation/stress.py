@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import csv
+import os
+from dataclasses import asdict, dataclass, fields, replace
 from numbers import Real
-from typing import Mapping
+from pathlib import Path
+from typing import Iterable, Mapping
 
 import numpy as np
 
@@ -35,6 +38,12 @@ class StressResult:
     commission_multiplier: float | None = None
     spread_multiplier: float | None = None
 
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+STRESS_RESULT_FIELDS = tuple(field.name for field in fields(StressResult))
+
 
 @dataclass(frozen=True)
 class StressReport:
@@ -54,7 +63,20 @@ def _is_numeric_domain(domain: object) -> bool:
     )
 
 
-def parameter_neighbors(params: Mapping[str, object], domains: Mapping[str, object]) -> list[dict]:
+def parameter_neighbors(
+    experiment_or_params: CompleteExperiment | Mapping[str, object],
+    domains: Mapping[str, object] | None = None,
+) -> list[dict]:
+    if isinstance(experiment_or_params, CompleteExperiment):
+        if domains is not None:
+            raise ValueError("domains must be omitted when passing a CompleteExperiment")
+        params: Mapping[str, object] = experiment_or_params.parameters
+        domains = get_strategy(experiment_or_params.strategy_name).parameter_domain
+    else:
+        params = experiment_or_params
+        if domains is None:
+            raise ValueError("domains are required when passing a parameter mapping")
+
     rows: list[dict] = []
     seen: set[str] = set()
     for key in sorted(params):
@@ -150,10 +172,9 @@ def stress_candidate(
     data: MarketBundle,
     config: StressConfig,
 ) -> StressReport:
-    definition = get_strategy(candidate.strategy_name)
     results: list[StressResult] = []
 
-    neighbors = parameter_neighbors(candidate.parameters, definition.parameter_domain)
+    neighbors = parameter_neighbors(candidate)
     for params in neighbors:
         changed = [key for key in candidate.parameters if params.get(key) != candidate.parameters.get(key)]
         if len(changed) != 1:
@@ -242,10 +263,36 @@ def stress_candidate(
     )
 
 
+def run_stress_suite(
+    experiment: CompleteExperiment,
+    market_bundle: MarketBundle,
+    config: StressConfig | None = None,
+) -> StressReport:
+    return stress_candidate(experiment, market_bundle, config or StressConfig())
+
+
+def write_stress_results(path: str | Path, results: Iterable[StressResult]) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    tmp = output.with_name(output.name + ".tmp")
+    rows = list(results)
+    with tmp.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=STRESS_RESULT_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row.to_dict())
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, output)
+
+
 __all__ = [
+    "STRESS_RESULT_FIELDS",
     "StressConfig",
     "StressReport",
     "StressResult",
     "parameter_neighbors",
+    "run_stress_suite",
     "stress_candidate",
+    "write_stress_results",
 ]
