@@ -122,7 +122,10 @@ def export_all_m1(
             if len(rates) == 0:
                 break
             chunks.append(_rates_to_frame(rates))
-            start_pos += len(rates)
+            returned = len(rates)
+            start_pos += returned
+            if returned < chunk_size:
+                break
 
         if not chunks:
             raise RuntimeError(f"MT5 returned no M1 history for {symbol}")
