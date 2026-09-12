@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import numpy as np
@@ -122,6 +123,25 @@ def test_approved_run_stress_suite_interface_uses_default_matrix():
     report = run_stress_suite(_candidate(), _market())
     assert report.parameter_run_count == 4
     assert report.cost_run_count == 10
+
+
+def test_commission_stress_is_pinned_to_approved_six_dollar_baseline():
+    standard = run_stress_suite(_candidate(), _market())
+    altered_source = run_stress_suite(
+        replace(_candidate(), commission_round_trip_per_lot=12.0),
+        _market(),
+    )
+    standard_rows = {
+        row.label: (row.pf, row.expectancy_usd, row.net_profit, row.max_drawdown_pct)
+        for row in standard.results
+        if row.label.startswith("commission:")
+    }
+    altered_rows = {
+        row.label: (row.pf, row.expectancy_usd, row.net_profit, row.max_drawdown_pct)
+        for row in altered_source.results
+        if row.label.startswith("commission:")
+    }
+    assert standard_rows == altered_rows
 
 
 def test_stress_writer_records_all_runs_with_canonical_fields(tmp_path):
