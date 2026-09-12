@@ -23,6 +23,24 @@ def _validate_sha256(value: str) -> str:
     return digest
 
 
+def _validate_holdout_binding(
+    experiment: CompleteExperiment,
+    source_data_sha256: str,
+    holdout_record: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    if holdout_record is None:
+        return None
+    holdout = dict(holdout_record)
+    if str(holdout.get("experiment_id") or "") != experiment.experiment_id:
+        raise ValueError("holdout experiment_id does not match finalist experiment")
+    if str(holdout.get("parameter_fingerprint") or "") != experiment.fingerprint:
+        raise ValueError("holdout parameter_fingerprint does not match finalist fingerprint")
+    holdout_sha = holdout.get("source_data_sha256")
+    if not isinstance(holdout_sha, str) or _validate_sha256(holdout_sha) != source_data_sha256:
+        raise ValueError("holdout source_data_sha256 does not match finalist source data")
+    return holdout
+
+
 def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -66,6 +84,8 @@ def _candidate_payload(
     source_data_sha256: str,
     holdout_record: Mapping[str, object] | None,
 ) -> dict[str, object]:
+    source_sha = _validate_sha256(source_data_sha256)
+    holdout = _validate_holdout_binding(experiment, source_sha, holdout_record)
     return {
         "experiment_id": experiment.experiment_id,
         "family": experiment.family,
@@ -86,13 +106,13 @@ def _candidate_payload(
         "fingerprint": experiment.fingerprint,
         "discovery_metrics": dict(discovery_metrics),
         "robustness_metrics": dict(robustness_metrics),
-        "source_data_sha256": _validate_sha256(source_data_sha256),
+        "source_data_sha256": source_sha,
         "score_version": SCORE_VERSION,
         "required_mt5_test_delays_ms": list(MT5_DELAYS_MS),
         "mt5_model": MT5_MODEL,
         "real_money_approval_required": True,
         "csv_evidence_tick_validated": False,
-        "holdout": None if holdout_record is None else dict(holdout_record),
+        "holdout": holdout,
     }
 
 
