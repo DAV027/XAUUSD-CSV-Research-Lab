@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import csv
+import os
+from dataclasses import asdict, dataclass, fields
+from pathlib import Path
 from typing import Mapping, Sequence
 
+from xau_lab.backtest.models import Trade
 from xau_lab.validation.promotion import stage1_decision
 from xau_lab.validation.scoring import score_candidate, score_survivor_set
 
 RESEARCH_ONLY_SCOPE = "research_candidate_only_not_live_trading_approval"
+TRADE_LOG_FIELDS = tuple(field.name for field in fields(Trade))
+_BASE_TABLE_FIELDS = ("experiment_id", "verdict", "rejection_reason", "approval_scope")
 
 
 @dataclass(frozen=True)
@@ -168,10 +174,83 @@ def classify_candidates(
     )
 
 
+def _field_order(rows: Sequence[Mapping[str, object]]) -> tuple[str, ...]:
+    order: list[str] = list(_BASE_TABLE_FIELDS)
+    seen = set(order)
+    for row in rows:
+        for key in row:
+            if key not in seen:
+                order.append(key)
+                seen.add(key)
+    return tuple(order)
+
+
+def _atomic_csv(path: Path, fieldnames: Sequence[str], rows: Sequence[Mapping[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key) for key in fieldnames})
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, path)
+
+
+def write_candidate_tables(result_root: str | Path, tables: CandidateTables) -> None:
+    root = Path(result_root)
+    for filename, rows in (
+        ("REJECTED.csv", tables.rejected),
+        ("SURVIVORS.csv", tables.survivors),
+        ("TOP_CANDIDATES.csv", tables.top_candidates),
+    ):
+        _atomic_csv(root / filename, _field_order(rows), rows)
+
+
+def _promoted_ids(tables: CandidateTables) -> tuple[str, ...]:
+    return tuple(
+        str(row["experiment_id"])
+        for row in (*tables.survivors, *tables.top_candidates)
+    )
+
+
+def write_promoted_trade_logs(
+    result_root: str | Path,
+    tables: CandidateTables,
+    trade_logs: Mapping[str, Sequence[Trade]],
+) -> None:
+    root = Path(result_root) / "trade_logs"
+    root.mkdir(parents=True, exist_ok=True)
+    promoted_ids = _promoted_ids(tables)
+    promoted_set = set(promoted_ids)
+
+    missing = [experiment_id for experiment_id in promoted_ids if experiment_id not in trade_logs]
+    if missing:
+        raise ValueError(f"missing captured trade logs for promoted experiments: {missing}")
+
+    for path in sorted(root.glob("*.csv")):
+        if path.stem not in promoted_set:
+            path.unlink()
+
+    for experiment_id in promoted_ids:
+        trades = tuple(trade_logs[experiment_id])
+        for trade in trades:
+            if trade.experiment_id != experiment_id:
+                raise ValueError(
+                    f"trade log experiment mismatch: expected {experiment_id}, got {trade.experiment_id}"
+                )
+        rows = [asdict(trade) for trade in trades]
+        _atomic_csv(root / f"{experiment_id}.csv", TRADE_LOG_FIELDS, rows)
+
+
 __all__ = [
     "CandidateTables",
     "RESEARCH_ONLY_SCOPE",
     "RobustCandidateDecision",
+    "TRADE_LOG_FIELDS",
     "classify_candidates",
     "robust_candidate_decision",
+    "write_candidate_tables",
+    "write_promoted_trade_logs",
 ]
