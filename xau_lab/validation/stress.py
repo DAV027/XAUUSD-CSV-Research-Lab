@@ -14,6 +14,8 @@ from xau_lab.experiments.spec import CompleteExperiment, canonical_json
 from xau_lab.runner.single import MarketBundle, run_experiment
 from xau_lab.strategies.registry import get_strategy
 
+APPROVED_COMMISSION_ROUND_TRIP_PER_LOT = 6.0
+
 
 @dataclass(frozen=True)
 class StressConfig:
@@ -209,11 +211,14 @@ def stress_candidate(
             )
         )
 
+    # The approved Phase-4 matrix explicitly defines commission stress against
+    # the canonical $6/lot round-trip baseline, not against a candidate-specific
+    # commission value. This keeps stress evidence comparable across candidates.
     for multiplier in config.commission_multipliers:
         stressed = replace(
             candidate,
             commission_round_trip_per_lot=(
-                float(candidate.commission_round_trip_per_lot) * float(multiplier)
+                APPROVED_COMMISSION_ROUND_TRIP_PER_LOT * float(multiplier)
             ),
         )
         results.append(
@@ -287,6 +292,7 @@ def write_stress_results(path: str | Path, results: Iterable[StressResult]) -> N
 
 
 __all__ = [
+    "APPROVED_COMMISSION_ROUND_TRIP_PER_LOT",
     "STRESS_RESULT_FIELDS",
     "StressConfig",
     "StressReport",
