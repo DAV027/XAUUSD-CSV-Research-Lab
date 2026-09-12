@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
@@ -33,22 +33,23 @@ class HoldoutRecord:
     def __post_init__(self) -> None:
         if not self.experiment_id:
             raise ValueError("experiment_id is required")
-        if not self.freeze_timestamp:
-            raise ValueError("freeze_timestamp is required")
+        freeze = _parse_freeze_timestamp(self.freeze_timestamp)
         digest = self.source_data_sha256.lower()
         if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ValueError("source_data_sha256 must be a 64-character SHA-256 hex digest")
         object.__setattr__(self, "source_data_sha256", digest)
         if not self.parameter_fingerprint:
             raise ValueError("parameter_fingerprint is required")
-        _parse_date(self.prospective_start, "prospective_start")
+        prospective = _parse_date(self.prospective_start, "prospective_start")
+        if prospective <= freeze.date():
+            raise ValueError("prospective_start must be strictly after freeze date")
         if self.planned_months != 3:
             raise ValueError("planned_months must be 3 for the approved prospective holdout")
         if not self.status:
             raise ValueError("status is required")
         if self.observed_through is not None:
             observed = _parse_date(self.observed_through, "observed_through")
-            if observed < _parse_date(self.prospective_start, "prospective_start"):
+            if observed < prospective:
                 raise ValueError("observed_through cannot be before prospective_start")
 
     def to_dict(self) -> dict[str, object]:
@@ -60,6 +61,21 @@ def _parse_date(value: str, name: str) -> date:
         return date.fromisoformat(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be an ISO date YYYY-MM-DD") from exc
+
+
+def _parse_freeze_timestamp(value: str) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("freeze_timestamp is required")
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError("freeze_timestamp must be a timezone-aware ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("freeze_timestamp must be a timezone-aware ISO-8601 timestamp")
+    return parsed.astimezone(timezone.utc)
 
 
 def _empty_registry() -> dict[str, object]:
