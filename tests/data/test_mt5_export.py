@@ -53,6 +53,11 @@ class FakeProvider:
         )
 
 
+class CappedHistoryProvider(FakeProvider):
+    def terminal_info(self):
+        return SimpleNamespace(maxbars=3)
+
+
 def test_export_writes_canonical_raw_csv_and_metadata(tmp_path):
     provider = FakeProvider()
     paths = DataPaths(tmp_path)
@@ -86,3 +91,15 @@ def test_export_rejects_invalid_timezone_before_connecting(tmp_path):
     with pytest.raises(ValueError):
         export_all_m1(provider, "XAUUSD", DataPaths(tmp_path), server_timezone="Not/AZone")
     assert provider.shutdown_called is False
+
+
+def test_export_rejects_history_pinned_to_terminal_max_bars(tmp_path):
+    provider = CappedHistoryProvider()
+    paths = DataPaths(tmp_path)
+
+    with pytest.raises(RuntimeError, match="Max bars in chart"):
+        export_all_m1(provider, "XAUUSD", paths, server_timezone="Etc/UTC")
+
+    assert provider.shutdown_called is True
+    assert not paths.raw_csv.exists()
+    assert not paths.metadata_json.exists()
