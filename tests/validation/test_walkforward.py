@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timezone
 
 import numpy as np
@@ -9,7 +10,12 @@ from xau_lab.experiments.spec import CompleteExperiment, canonical_json
 from xau_lab.runner.single import MarketBundle, run_experiment
 from xau_lab.strategies.base import StrategyContext, StrategyDefinition
 from xau_lab.strategies.registry import register_strategy
-from xau_lab.validation.walkforward import summarize_fold_results, validate_candidate
+from xau_lab.validation.walkforward import (
+    FOLD_RESULT_FIELDS,
+    summarize_fold_results,
+    validate_candidate,
+    write_fold_results,
+)
 
 
 def _regime_signal(ctx: StrategyContext, params: dict) -> np.ndarray:
@@ -127,6 +133,19 @@ def test_walkforward_summary_exposes_validation_stability_and_degradation_ratio(
     assert summary["validation_joint_stability_fraction"] == 0.0
     assert summary["worst_validation_net_profit"] < 0.0
     assert summary["research_to_validation_pf_degradation_ratio"] is not None
+
+
+def test_walkforward_writer_uses_exact_plan_fields(tmp_path):
+    rows = validate_candidate(_experiment(), _market(), "expanding")
+    output = tmp_path / "FOLD_RESULTS.csv"
+    write_fold_results(output, rows)
+    with output.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        assert tuple(reader.fieldnames or ()) == FOLD_RESULT_FIELDS
+        saved = list(reader)
+    assert len(saved) == 2
+    assert saved[0]["experiment_id"] == "EXP_WF_REGIME"
+    assert saved[1]["segment"] == "validation"
 
 
 def test_scheme_must_be_expanding_or_rolling():
