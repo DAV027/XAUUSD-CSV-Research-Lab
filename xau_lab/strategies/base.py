@@ -81,4 +81,12 @@ class StrategyDefinition:
             raise ValueError("strategy signal length must equal context length")
         if not np.isin(signal, (-1, 0, 1)).all():
             raise ValueError("strategy signals must contain only -1, 0, 1")
-        return np.ascontiguousarray(signal, dtype=np.int8)
+        filtered = np.ascontiguousarray(signal, dtype=np.int8)
+        entry_allowed = ctx.features.get("entry_allowed")
+        if entry_allowed is not None:
+            allowed = np.asarray(entry_allowed, dtype=np.bool_)
+            if len(allowed) != len(filtered):
+                raise ValueError("entry_allowed feature length must equal context length")
+            filtered = filtered.copy()
+            filtered[~allowed] = 0
+        return filtered
