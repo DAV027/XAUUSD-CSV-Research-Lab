@@ -5,11 +5,14 @@ import csv
 from xau_lab.backtest.models import Trade
 from xau_lab.validation.reporting import (
     RESEARCH_ONLY_SCOPE,
+    build_robustness_evidence,
     classify_candidates,
     robust_candidate_decision,
     write_candidate_tables,
     write_promoted_trade_logs,
 )
+from xau_lab.validation.stress import StressReport, StressResult
+from xau_lab.validation.walkforward import FoldResult
 
 
 def _master(experiment_id: str, **overrides):
@@ -48,7 +51,7 @@ def _robust(**overrides):
     return base | overrides
 
 
-def _trade(experiment_id: str) -> Trade:
+def _trade(experiment_id: str, *, net_pnl: float = 0.22, broker_date: str = "2026-01-02") -> Trade:
     return Trade(
         experiment_id=experiment_id,
         parameter_set_id="p",
@@ -70,11 +73,28 @@ def _trade(experiment_id: str) -> Trade:
         spread_cost=0.1,
         commission=0.06,
         slippage_cost=0.02,
-        net_pnl=0.22,
-        pnl_R=0.22,
+        net_pnl=net_pnl,
+        pnl_R=net_pnl,
         hold_minutes=1.0,
-        broker_date="2026-01-02",
+        broker_date=broker_date,
         broker_timezone="UTC",
+    )
+
+
+def _fold(scheme: str, fold_id: str, segment: str, pf: float, expectancy: float) -> FoldResult:
+    return FoldResult(
+        experiment_id="robust",
+        scheme=scheme,
+        fold_id=fold_id,
+        segment=segment,
+        start="2024-01",
+        end="2024-03",
+        trades=100,
+        pf=pf,
+        expectancy_usd=expectancy,
+        net_profit=10.0 if expectancy > 0 else -10.0,
+        max_drawdown_pct=2.0,
+        positive_day_fraction=0.60,
     )
 
 
@@ -160,6 +180,56 @@ def test_robust_candidate_has_completed_final_score_and_all_components():
         "side_dependence_penalty",
     ):
         assert field in row
+
+
+def test_build_robustness_evidence_combines_both_schemes_stress_and_seeded_resampling():
+    expanding = [
+        _fold("expanding", "E1", "research", 1.30, 0.20),
+        _fold("expanding", "E1", "validation", 1.10, 0.10),
+    ]
+    rolling = [
+        _fold("rolling", "R1", "research", 1.25, 0.15),
+        _fold("rolling", "R1", "validation", 1.30, 0.12),
+    ]
+    stress = StressReport(
+        results=(
+            StressResult("robust", "parameter", "parameter:x:1", 1.1, 0.1, 5.0, 3.0),
+            StressResult("robust", "cost", "slippage:20", 1.05, 0.05, 2.0, 4.0),
+        ),
+        parameter_stability_pct=80.0,
+        cost_stability_pct=70.0,
+        max_drawdown_pct=4.0,
+        parameter_run_count=1,
+        cost_run_count=1,
+    )
+    trades = (
+        _trade("robust", net_pnl=10.0, broker_date="2026-01-02"),
+        _trade("robust", net_pnl=8.0, broker_date="2026-01-02"),
+        _trade("robust", net_pnl=5.0, broker_date="2026-01-03"),
+        _trade("robust", net_pnl=-4.0, broker_date="2026-01-04"),
+        _trade("robust", net_pnl=-3.0, broker_date="2026-01-05"),
+        _trade("robust", net_pnl=2.0, broker_date="2026-01-06"),
+        _trade("robust", net_pnl=-1.0, broker_date="2026-01-07"),
+    )
+    evidence = build_robustness_evidence(
+        expanding,
+        rolling,
+        stress,
+        trades,
+        resample_n=100,
+        seed=9_216_000,
+    )
+    assert evidence["expanding_validation_joint_stability_fraction"] == 1.0
+    assert evidence["rolling_validation_joint_stability_fraction"] == 1.0
+    assert evidence["median_validation_pf"] == 1.20
+    assert evidence["parameter_stability_pct"] == 80.0
+    assert evidence["cost_stability_pct"] == 70.0
+    assert evidence["stress_max_drawdown_pct"] == 4.0
+    assert evidence["top_five_removal_net_profit"] < 0.0
+    assert evidence["bootstrap_seed"] == 9_216_000
+    assert evidence["bootstrap_n"] == 100
+    assert evidence["monte_carlo_seed"] == 9_216_000
+    assert evidence["monte_carlo_label"] == "sequence_only_not_entry_edge_proof"
 
 
 def test_reporting_writes_canonical_tables_and_only_promoted_trade_logs(tmp_path):
