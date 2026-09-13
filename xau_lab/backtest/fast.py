@@ -8,6 +8,7 @@ from numba import njit
 
 from xau_lab.backtest.models import BacktestResult, CostModel, ExitSpec, MarketBars, RiskModel, SymbolSpec
 from xau_lab.backtest.reference import _Position, _finalize_trade
+from xau_lab.signals import normalize_signal_array
 
 
 _STOP = 1
@@ -113,20 +114,21 @@ def _kernel(
     target_r,
     time_exit_minutes,
     atr_trail,
+    output_capacity,
 ):
     n = len(time_epoch)
-    out_direction = np.zeros(n, dtype=np.int8)
-    out_signal_index = np.full(n, -1, dtype=np.int64)
-    out_entry_index = np.full(n, -1, dtype=np.int64)
-    out_exit_index = np.full(n, -1, dtype=np.int64)
-    out_raw_entry = np.zeros(n, dtype=np.float64)
-    out_entry_price = np.zeros(n, dtype=np.float64)
-    out_initial_stop = np.zeros(n, dtype=np.float64)
-    out_target = np.full(n, np.nan, dtype=np.float64)
-    out_lot = np.zeros(n, dtype=np.float64)
-    out_planned_risk = np.zeros(n, dtype=np.float64)
-    out_raw_exit = np.zeros(n, dtype=np.float64)
-    out_reason = np.zeros(n, dtype=np.int8)
+    out_direction = np.zeros(output_capacity, dtype=np.int8)
+    out_signal_index = np.full(output_capacity, -1, dtype=np.int64)
+    out_entry_index = np.full(output_capacity, -1, dtype=np.int64)
+    out_exit_index = np.full(output_capacity, -1, dtype=np.int64)
+    out_raw_entry = np.zeros(output_capacity, dtype=np.float64)
+    out_entry_price = np.zeros(output_capacity, dtype=np.float64)
+    out_initial_stop = np.zeros(output_capacity, dtype=np.float64)
+    out_target = np.full(output_capacity, np.nan, dtype=np.float64)
+    out_lot = np.zeros(output_capacity, dtype=np.float64)
+    out_planned_risk = np.zeros(output_capacity, dtype=np.float64)
+    out_raw_exit = np.zeros(output_capacity, dtype=np.float64)
+    out_reason = np.zeros(output_capacity, dtype=np.int8)
 
     trade_count = 0
     risk_skip_count = 0
@@ -400,16 +402,15 @@ def run_fast_backtest(
     risk: RiskModel,
     exit_spec: ExitSpec,
 ) -> BacktestResult:
-    signal_values = list(signals)
-    if len(signal_values) != len(bars):
+    raw_signals = np.asarray(signals)
+    if raw_signals.ndim != 1 or len(raw_signals) != len(bars):
         raise ValueError("signals length must match MarketBars")
-    if any(signal not in (-1, 0, 1) for signal in signal_values):
-        raise ValueError("signals must contain only -1, 0, +1")
-    signal_array = np.ascontiguousarray(np.asarray(signal_values, dtype=np.int8))
+    signal_array = normalize_signal_array(raw_signals)
 
     target_r = -1.0 if exit_spec.target_r is None else float(exit_spec.target_r)
     time_exit = -1.0 if exit_spec.time_exit_minutes is None else float(exit_spec.time_exit_minutes)
     trail = -1.0 if exit_spec.atr_trail is None else float(exit_spec.atr_trail)
+    output_capacity = int(np.count_nonzero(signal_array))
 
     packed = _kernel(
         bars.time_epoch,
@@ -435,6 +436,7 @@ def run_fast_backtest(
         target_r,
         time_exit,
         trail,
+        output_capacity,
     )
 
     (

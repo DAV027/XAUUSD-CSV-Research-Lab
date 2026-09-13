@@ -70,7 +70,12 @@ def summarize_pnl(pnl: Iterable[float], starting_equity: float) -> dict[str, flo
     }
 
 
-def summarize_trades(trades: Iterable[Trade], starting_equity: float) -> dict[str, float | int | None]:
+def summarize_trades(
+    trades: Iterable[Trade],
+    starting_equity: float,
+    *,
+    broker_dates: Sequence[object] | None = None,
+) -> dict[str, float | int | None]:
     trade_list = list(trades)
     net = [float(trade.net_pnl) for trade in trade_list]
     out: dict[str, float | int | None] = dict(summarize_pnl(net, starting_equity))
@@ -82,8 +87,13 @@ def summarize_trades(trades: Iterable[Trade], starting_equity: float) -> dict[st
     monthly: dict[str, float] = defaultdict(float)
     yearly: dict[int, float] = defaultdict(float)
     for trade in trade_list:
-        parsed = date.fromisoformat(trade.broker_date)
-        daily[trade.broker_date] += float(trade.net_pnl)
+        broker_date = trade.broker_date
+        if broker_dates is not None and trade.entry_index >= 0:
+            if trade.entry_index >= len(broker_dates):
+                raise ValueError("trade entry_index exceeds broker_dates length")
+            broker_date = str(broker_dates[trade.entry_index])
+        parsed = date.fromisoformat(broker_date)
+        daily[broker_date] += float(trade.net_pnl)
         monthly[f"{parsed.year:04d}-{parsed.month:02d}"] += float(trade.net_pnl)
         yearly[parsed.year] += float(trade.net_pnl)
 
