@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
+from numba import njit
 
 from xau_lab.strategies.base import StrategyContext, StrategyDefinition
 from xau_lab.strategies.registry import register_strategy
@@ -8,6 +11,156 @@ from xau_lab.strategies.registry import register_strategy
 
 def _finite(values: np.ndarray) -> bool:
     return len(values) > 0 and np.isfinite(values).all()
+
+
+@njit(cache=True)
+def _max_heap_push(heap: np.ndarray, size: int, value: float) -> int:
+    index = size
+    heap[index] = value
+    while index > 0:
+        parent = (index - 1) // 2
+        if heap[parent] >= heap[index]:
+            break
+        tmp = heap[parent]
+        heap[parent] = heap[index]
+        heap[index] = tmp
+        index = parent
+    return size + 1
+
+
+@njit(cache=True)
+def _min_heap_push(heap: np.ndarray, size: int, value: float) -> int:
+    index = size
+    heap[index] = value
+    while index > 0:
+        parent = (index - 1) // 2
+        if heap[parent] <= heap[index]:
+            break
+        tmp = heap[parent]
+        heap[parent] = heap[index]
+        heap[index] = tmp
+        index = parent
+    return size + 1
+
+
+@njit(cache=True)
+def _max_heap_pop(heap: np.ndarray, size: int) -> tuple[float, int]:
+    root = heap[0]
+    new_size = size - 1
+    if new_size == 0:
+        return root, 0
+
+    heap[0] = heap[new_size]
+    index = 0
+    while True:
+        left = 2 * index + 1
+        if left >= new_size:
+            break
+        right = left + 1
+        child = left
+        if right < new_size and heap[right] > heap[left]:
+            child = right
+        if heap[index] >= heap[child]:
+            break
+        tmp = heap[index]
+        heap[index] = heap[child]
+        heap[child] = tmp
+        index = child
+    return root, new_size
+
+
+@njit(cache=True)
+def _min_heap_pop(heap: np.ndarray, size: int) -> tuple[float, int]:
+    root = heap[0]
+    new_size = size - 1
+    if new_size == 0:
+        return root, 0
+
+    heap[0] = heap[new_size]
+    index = 0
+    while True:
+        left = 2 * index + 1
+        if left >= new_size:
+            break
+        right = left + 1
+        child = left
+        if right < new_size and heap[right] < heap[left]:
+            child = right
+        if heap[index] <= heap[child]:
+            break
+        tmp = heap[index]
+        heap[index] = heap[child]
+        heap[child] = tmp
+        index = child
+    return root, new_size
+
+
+@njit(cache=True)
+def _expanding_linear_quantiles_kernel(values: np.ndarray, q: float) -> np.ndarray:
+    """Exact NumPy-linear quantile of every strict prefix values[:i]."""
+    n = len(values)
+    out = np.full(n, np.nan, dtype=np.float64)
+    if n <= 1:
+        return out
+
+    # The two heaps partition the finite history around the requested floor rank.
+    # Only insertions are required because the quantile is expanding, not rolling.
+    lower = np.empty(n, dtype=np.float64)  # max heap, ranks <= floor(h)
+    upper = np.empty(n, dtype=np.float64)  # min heap, ranks > floor(h)
+    lower_size = 0
+    upper_size = 0
+    history_valid = True
+
+    for i in range(1, n):
+        value = values[i - 1]
+        if not np.isfinite(value):
+            history_valid = False
+        if not history_valid:
+            continue
+
+        if lower_size == 0 or value <= lower[0]:
+            lower_size = _max_heap_push(lower, lower_size, value)
+        else:
+            upper_size = _min_heap_push(upper, upper_size, value)
+
+        history_size = i
+        h = (history_size - 1) * q
+        floor_rank = int(math.floor(h))
+        desired_lower_size = floor_rank + 1
+
+        while lower_size > desired_lower_size:
+            moved, lower_size = _max_heap_pop(lower, lower_size)
+            upper_size = _min_heap_push(upper, upper_size, moved)
+        while lower_size < desired_lower_size:
+            moved, upper_size = _min_heap_pop(upper, upper_size)
+            lower_size = _max_heap_push(lower, lower_size, moved)
+
+        lower_value = lower[0]
+        fraction = h - floor_rank
+        if fraction == 0.0:
+            out[i] = lower_value
+        else:
+            upper_value = upper[0]
+            difference = upper_value - lower_value
+            # Match NumPy's stable linear interpolation branch in _lerp.
+            if fraction >= 0.5:
+                out[i] = upper_value - difference * (1.0 - fraction)
+            else:
+                out[i] = lower_value + difference * fraction
+
+    return out
+
+
+def _expanding_linear_quantiles(values: np.ndarray, q: float) -> np.ndarray:
+    """Return exact default-linear quantiles for strict expanding prefixes."""
+    q = float(q)
+    if not 0.0 <= q <= 1.0:
+        raise ValueError("quantile must be in [0, 1]")
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim != 1:
+        raise ValueError("values must be one-dimensional")
+    array = np.ascontiguousarray(array)
+    return _expanding_linear_quantiles_kernel(array, q)
 
 
 def nbar_breakout(ctx: StrategyContext, params: dict) -> np.ndarray:
@@ -133,15 +286,20 @@ def compression_breakout(ctx: StrategyContext, params: dict) -> np.ndarray:
     breakout_lookback = int(params["breakout_lookback"])
     out = np.zeros(len(ctx), dtype=np.int8)
     ranges = np.asarray(ctx.high - ctx.low, dtype=np.float64)
+    thresholds = _expanding_linear_quantiles(ranges, compression_percentile)
     warmup = max(compression_lookback, breakout_lookback)
     for i in range(warmup, len(ctx)):
         compressed = ranges[i - compression_lookback : i]
-        history = ranges[:i]
         breakout_highs = ctx.high[i - breakout_lookback : i]
         breakout_lows = ctx.low[i - breakout_lookback : i]
-        if not (_finite(compressed) and _finite(history) and _finite(breakout_highs) and _finite(breakout_lows)):
+        threshold = thresholds[i]
+        if not (
+            _finite(compressed)
+            and np.isfinite(threshold)
+            and _finite(breakout_highs)
+            and _finite(breakout_lows)
+        ):
             continue
-        threshold = float(np.quantile(history, compression_percentile))
         if float(np.mean(compressed)) > threshold:
             continue
         close = float(ctx.close[i])
