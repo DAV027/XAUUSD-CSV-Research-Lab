@@ -6,7 +6,7 @@ from typing import Callable, Mapping
 
 import numpy as np
 
-from xau_lab.signals import signal_domain_is_valid
+from xau_lab.signals import signal_domain_is_valid, zero_disallowed_signals
 
 SignalFunction = Callable[["StrategyContext", dict], np.ndarray]
 
@@ -93,5 +93,5 @@ class StrategyDefinition:
             # The signal may alias strategy-owned/read-only storage. Only allocate
             # a private writable copy when the integrity mask must mutate it.
             filtered = filtered.copy()
-            np.putmask(filtered, np.logical_not(allowed), 0)
+            zero_disallowed_signals(filtered, allowed)
         return filtered
