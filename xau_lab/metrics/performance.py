@@ -70,8 +70,10 @@ def summarize_pnl(pnl: Iterable[float], starting_equity: float) -> dict[str, flo
     }
 
 
-def summarize_trades(trades: Iterable[Trade], starting_equity: float) -> dict[str, float | int | None]:
-    trade_list = list(trades)
+def summarize_trades(trades: Iterable[Trade], starting_equity: float, *, broker_dates: Sequence[str] | None = None) -> dict[str, float | int | None]:
+    trade_list = trades if isinstance(trades, (list, tuple)) else list(trades)
+    if broker_dates is not None and len(broker_dates) != len(trade_list):
+        raise ValueError("broker_dates length must match trades")
     net = [float(trade.net_pnl) for trade in trade_list]
     out: dict[str, float | int | None] = dict(summarize_pnl(net, starting_equity))
 
@@ -81,9 +83,10 @@ def summarize_trades(trades: Iterable[Trade], starting_equity: float) -> dict[st
     daily: dict[str, float] = defaultdict(float)
     monthly: dict[str, float] = defaultdict(float)
     yearly: dict[int, float] = defaultdict(float)
-    for trade in trade_list:
-        parsed = date.fromisoformat(trade.broker_date)
-        daily[trade.broker_date] += float(trade.net_pnl)
+    for index, trade in enumerate(trade_list):
+        broker_date = trade.broker_date if broker_dates is None else broker_dates[index]
+        parsed = date.fromisoformat(broker_date)
+        daily[broker_date] += float(trade.net_pnl)
         monthly[f"{parsed.year:04d}-{parsed.month:02d}"] += float(trade.net_pnl)
         yearly[parsed.year] += float(trade.net_pnl)
 

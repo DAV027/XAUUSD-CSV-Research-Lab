@@ -112,3 +112,22 @@ def test_campaign_is_deterministic_across_worker_counts_and_resume(tmp_path: Pat
     assert len(ids) == 20
     assert len(set(ids)) == 20
     assert set(ids) == set(catalog_ids)
+
+
+def test_discovery_matches_export_metrics_without_trade_duplication(tmp_path, monkeypatch):
+    import xau_lab.runner.single as single
+    from xau_lab.runner.campaign import load_market_bundle, _read_catalog
+    feature_path = _write_market(tmp_path)
+    catalog_path = tmp_path / 'catalog.csv'
+    _write_catalog(catalog_path, count=20)
+    market = load_market_bundle(feature_path)
+    experiments = _read_catalog(catalog_path)
+    exported = [single.run_experiment(e, market, include_trades=True) for e in experiments]
+    assert any(out.trades for out in exported)
+    def forbidden(*args):
+        raise AssertionError('discovery duplicates annotated trades')
+    monkeypatch.setattr(single, '_annotate_trade', forbidden)
+    for experiment, expected in zip(experiments, exported, strict=True):
+        actual = single.run_experiment(experiment, market)
+        assert actual.master_result == expected.master_result
+        assert actual.trades == ()
