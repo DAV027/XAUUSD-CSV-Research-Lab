@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import xau_lab.backtest.fast as fast_module
 from xau_lab.backtest.fast import run_fast_backtest
 from xau_lab.backtest.models import CostModel, ExitSpec, MarketBars, RiskModel, SymbolSpec
 from xau_lab.backtest.reference import run_reference_backtest
@@ -99,7 +100,7 @@ def test_fast_backtest_rejects_non_domain_values_before_int8_coercion(invalid):
     float_signals = signals.astype(np.float64)
     float_signals[7] = invalid
 
-    with pytest.raises(ValueError, match="signals must contain only -1, 0, \+1"):
+    with pytest.raises(ValueError, match=r"signals must contain only -1, 0, \+1"):
         run_fast_backtest(
             bars,
             float_signals,
@@ -108,3 +109,46 @@ def test_fast_backtest_rejects_non_domain_values_before_int8_coercion(invalid):
             RISK,
             ExitSpec(stop_atr=1.0, target_r=1.5),
         )
+
+
+def test_fast_backtest_sizes_kernel_output_capacity_to_nonzero_signals(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    bars, _ = _random_market(n=4096)
+    signals = np.zeros(4096, dtype=np.int8)
+    signals[[10, 1000, 3000]] = [1, -1, 1]
+    captured = {}
+
+    def fake_kernel(*args):
+        captured["capacity"] = args[-1]
+        capacity = max(0, int(args[-1]))
+        return (
+            0,
+            0,
+            np.zeros(capacity, dtype=np.int8),
+            np.full(capacity, -1, dtype=np.int64),
+            np.full(capacity, -1, dtype=np.int64),
+            np.full(capacity, -1, dtype=np.int64),
+            np.zeros(capacity, dtype=np.float64),
+            np.zeros(capacity, dtype=np.float64),
+            np.zeros(capacity, dtype=np.float64),
+            np.full(capacity, np.nan, dtype=np.float64),
+            np.zeros(capacity, dtype=np.float64),
+            np.zeros(capacity, dtype=np.float64),
+            np.zeros(capacity, dtype=np.float64),
+            np.zeros(capacity, dtype=np.int8),
+        )
+
+    monkeypatch.setattr(fast_module, "_kernel", fake_kernel)
+
+    result = run_fast_backtest(
+        bars,
+        signals,
+        SPEC,
+        COST,
+        RISK,
+        ExitSpec(stop_atr=1.0, target_r=1.5),
+    )
+
+    assert result.trades == ()
+    assert captured["capacity"] == 3
