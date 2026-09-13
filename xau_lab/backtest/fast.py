@@ -8,6 +8,7 @@ from numba import njit
 
 from xau_lab.backtest.models import BacktestResult, CostModel, ExitSpec, MarketBars, RiskModel, SymbolSpec
 from xau_lab.backtest.reference import _Position, _finalize_trade
+from xau_lab.signals import normalize_signal_array
 
 
 _STOP = 1
@@ -400,12 +401,10 @@ def run_fast_backtest(
     risk: RiskModel,
     exit_spec: ExitSpec,
 ) -> BacktestResult:
-    signal_values = list(signals)
-    if len(signal_values) != len(bars):
+    raw_signals = np.asarray(signals)
+    if raw_signals.ndim != 1 or len(raw_signals) != len(bars):
         raise ValueError("signals length must match MarketBars")
-    if any(signal not in (-1, 0, 1) for signal in signal_values):
-        raise ValueError("signals must contain only -1, 0, +1")
-    signal_array = np.ascontiguousarray(np.asarray(signal_values, dtype=np.int8))
+    signal_array = normalize_signal_array(raw_signals)
 
     target_r = -1.0 if exit_spec.target_r is None else float(exit_spec.target_r)
     time_exit = -1.0 if exit_spec.time_exit_minutes is None else float(exit_spec.time_exit_minutes)
