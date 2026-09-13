@@ -141,8 +141,17 @@ def run_experiment(
         risk,
         _exit_spec(experiment),
     )
-    trades = tuple(_annotate_trade(trade, experiment, market_bundle) for trade in result.trades)
-    metrics = summarize_trades(trades, starting_equity=risk.account_equity)
+
+    if include_trades:
+        trades = tuple(_annotate_trade(trade, experiment, market_bundle) for trade in result.trades)
+        metrics = summarize_trades(trades, starting_equity=risk.account_equity)
+    else:
+        trades = ()
+        metrics = summarize_trades(
+            result.trades,
+            starting_equity=risk.account_equity,
+            broker_dates=market_bundle.broker_date,
+        )
 
     master = {
         **experiment.to_dict(),
@@ -154,7 +163,7 @@ def run_experiment(
     return ExperimentOutcome(
         experiment_id=experiment.experiment_id,
         master_result=master,
-        trades=trades if include_trades else (),
+        trades=trades,
     )
 
 
