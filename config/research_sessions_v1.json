@@ -1,0 +1,18 @@
+{
+  "version": "v1",
+  "broker_timezone": "EET",
+  "asia_timezone": "Asia/Tokyo",
+  "asia_start": "09:00",
+  "asia_end": "18:00",
+  "london_timezone": "Europe/London",
+  "london_start": "08:00",
+  "london_end": "17:00",
+  "new_york_timezone": "America/New_York",
+  "new_york_start": "08:00",
+  "new_york_end": "17:00",
+  "research_note": "Frozen research convention for major FX sessions. Session clocks are evaluated in each market's local IANA timezone so DST is applied by timezone rules. This is a research convention, not an exchange-defined XAUUSD trading schedule.",
+  "source_notes": [
+    "BabyPips Forex Trading Sessions: Tokyo 09:00-18:00 local, London 08:00-17:00 local, New York 08:00-17:00 local; session UTC times can shift with DST.",
+    "IG UK forex market hours: London local session 08:00-17:00 and session relationships change with daylight-saving time."
+  ]
+}
