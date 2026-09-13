@@ -14,6 +14,13 @@ def _signal_domain_is_valid(values: np.ndarray) -> bool:
     return True
 
 
+@njit(cache=True)
+def _zero_disallowed_signals(values: np.ndarray, allowed: np.ndarray) -> None:
+    for index in range(len(values)):
+        if not allowed[index]:
+            values[index] = 0
+
+
 def signal_domain_is_valid(values: np.ndarray) -> bool:
     """Return whether a one-dimensional numeric array contains only -1, 0, or 1."""
     array = np.asarray(values)
@@ -34,4 +41,15 @@ def normalize_signal_array(values: object) -> np.ndarray:
     return np.ascontiguousarray(array, dtype=np.int8)
 
 
-__all__ = ["normalize_signal_array", "signal_domain_is_valid"]
+def zero_disallowed_signals(values: np.ndarray, allowed: np.ndarray) -> None:
+    """Mask a private writable signal array in place without a boolean temporary."""
+    if values.ndim != 1 or allowed.ndim != 1 or len(values) != len(allowed):
+        raise ValueError("signal and allowed arrays must be one-dimensional and equal length")
+    _zero_disallowed_signals(values, allowed)
+
+
+__all__ = [
+    "normalize_signal_array",
+    "signal_domain_is_valid",
+    "zero_disallowed_signals",
+]
