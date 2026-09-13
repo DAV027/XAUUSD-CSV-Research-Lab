@@ -5,6 +5,7 @@ from types import MappingProxyType
 from typing import Callable, Mapping
 
 import numpy as np
+from xau_lab.signals import valid_signals
 
 SignalFunction = Callable[["StrategyContext", dict], np.ndarray]
 
@@ -79,7 +80,7 @@ class StrategyDefinition:
         signal = np.asarray(self.signal(ctx, dict(params)))
         if signal.ndim != 1 or len(signal) != len(ctx):
             raise ValueError("strategy signal length must equal context length")
-        if not np.isin(signal, (-1, 0, 1)).all():
+        if not valid_signals(signal):
             raise ValueError("strategy signals must contain only -1, 0, 1")
         filtered = np.ascontiguousarray(signal, dtype=np.int8)
         entry_allowed = ctx.features.get("entry_allowed")

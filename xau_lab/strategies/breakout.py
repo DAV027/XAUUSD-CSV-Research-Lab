@@ -4,6 +4,7 @@ import numpy as np
 
 from xau_lab.strategies.base import StrategyContext, StrategyDefinition
 from xau_lab.strategies.registry import register_strategy
+from xau_lab.strategies.order_statistics import expanding_quantiles, _prefix_length
 
 
 def _finite(values: np.ndarray) -> bool:
@@ -134,14 +135,14 @@ def compression_breakout(ctx: StrategyContext, params: dict) -> np.ndarray:
     out = np.zeros(len(ctx), dtype=np.int8)
     ranges = np.asarray(ctx.high - ctx.low, dtype=np.float64)
     warmup = max(compression_lookback, breakout_lookback)
-    for i in range(warmup, len(ctx)):
+    thresholds = expanding_quantiles(ranges, compression_percentile)
+    for i in range(warmup, min(len(ctx), _prefix_length(ranges) + 1)):
         compressed = ranges[i - compression_lookback : i]
-        history = ranges[:i]
         breakout_highs = ctx.high[i - breakout_lookback : i]
         breakout_lows = ctx.low[i - breakout_lookback : i]
-        if not (_finite(compressed) and _finite(history) and _finite(breakout_highs) and _finite(breakout_lows)):
+        if not (_finite(compressed) and _finite(breakout_highs) and _finite(breakout_lows)):
             continue
-        threshold = float(np.quantile(history, compression_percentile))
+        threshold = float(thresholds[i])
         if float(np.mean(compressed)) > threshold:
             continue
         close = float(ctx.close[i])

@@ -5,6 +5,7 @@ from typing import Sequence
 
 import numpy as np
 from numba import njit
+from xau_lab.signals import valid_signals
 
 from xau_lab.backtest.models import BacktestResult, CostModel, ExitSpec, MarketBars, RiskModel, SymbolSpec
 from xau_lab.backtest.reference import _Position, _finalize_trade
@@ -115,18 +116,20 @@ def _kernel(
     atr_trail,
 ):
     n = len(time_epoch)
-    out_direction = np.zeros(n, dtype=np.int8)
-    out_signal_index = np.full(n, -1, dtype=np.int64)
-    out_entry_index = np.full(n, -1, dtype=np.int64)
-    out_exit_index = np.full(n, -1, dtype=np.int64)
-    out_raw_entry = np.zeros(n, dtype=np.float64)
-    out_entry_price = np.zeros(n, dtype=np.float64)
-    out_initial_stop = np.zeros(n, dtype=np.float64)
-    out_target = np.full(n, np.nan, dtype=np.float64)
-    out_lot = np.zeros(n, dtype=np.float64)
-    out_planned_risk = np.zeros(n, dtype=np.float64)
-    out_raw_exit = np.zeros(n, dtype=np.float64)
-    out_reason = np.zeros(n, dtype=np.int8)
+    # Each trade consumes a distinct nonzero signal before the final bar.
+    capacity = np.count_nonzero(signals[:max(0, n - 1)])
+    out_direction = np.zeros(capacity, dtype=np.int8)
+    out_signal_index = np.full(capacity, -1, dtype=np.int64)
+    out_entry_index = np.full(capacity, -1, dtype=np.int64)
+    out_exit_index = np.full(capacity, -1, dtype=np.int64)
+    out_raw_entry = np.zeros(capacity, dtype=np.float64)
+    out_entry_price = np.zeros(capacity, dtype=np.float64)
+    out_initial_stop = np.zeros(capacity, dtype=np.float64)
+    out_target = np.full(capacity, np.nan, dtype=np.float64)
+    out_lot = np.zeros(capacity, dtype=np.float64)
+    out_planned_risk = np.zeros(capacity, dtype=np.float64)
+    out_raw_exit = np.zeros(capacity, dtype=np.float64)
+    out_reason = np.zeros(capacity, dtype=np.int8)
 
     trade_count = 0
     risk_skip_count = 0
@@ -400,10 +403,10 @@ def run_fast_backtest(
     risk: RiskModel,
     exit_spec: ExitSpec,
 ) -> BacktestResult:
-    signal_values = list(signals)
-    if len(signal_values) != len(bars):
+    signal_values = np.asarray(signals)
+    if signal_values.ndim != 1 or len(signal_values) != len(bars):
         raise ValueError("signals length must match MarketBars")
-    if any(signal not in (-1, 0, 1) for signal in signal_values):
+    if not valid_signals(signal_values):
         raise ValueError("signals must contain only -1, 0, +1")
     signal_array = np.ascontiguousarray(np.asarray(signal_values, dtype=np.int8))
 
