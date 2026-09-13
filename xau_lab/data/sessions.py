@@ -12,10 +12,13 @@ _TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 @dataclass(frozen=True)
 class SessionConfig:
     broker_timezone: str | None
+    asia_timezone: str
     asia_start: str
     asia_end: str
+    london_timezone: str
     london_start: str
     london_end: str
+    new_york_timezone: str
     new_york_start: str
     new_york_end: str
 
@@ -36,13 +39,24 @@ def _in_window(minute_of_day: int, start: int, end: int) -> bool:
     return minute_of_day >= start or minute_of_day < end
 
 
+def _session_zone(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
+        raise ValueError(f"invalid IANA session timezone: {name!r}") from exc
+
+
 def add_session_features(frame: pl.DataFrame, config: SessionConfig) -> pl.DataFrame:
     if config.broker_timezone is None:
         raise ValueError("broker timezone must be explicit before session research")
     try:
-        zone = ZoneInfo(config.broker_timezone)
+        broker_zone = ZoneInfo(config.broker_timezone)
     except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
         raise ValueError(f"invalid IANA broker timezone: {config.broker_timezone!r}") from exc
+
+    asia_zone = _session_zone(config.asia_timezone)
+    london_zone = _session_zone(config.london_timezone)
+    new_york_zone = _session_zone(config.new_york_timezone)
 
     asia_start = _clock_to_minutes(config.asia_start)
     asia_end = _clock_to_minutes(config.asia_end)
@@ -63,18 +77,24 @@ def add_session_features(frame: pl.DataFrame, config: SessionConfig) -> pl.DataF
     overlap_flags: list[bool] = []
 
     for raw_time in frame.get_column("time").to_list():
-        dt = datetime.strptime(str(raw_time), _TIME_FORMAT).replace(tzinfo=zone)
-        minute_of_day = dt.hour * 60 + dt.minute
-        asia = _in_window(minute_of_day, asia_start, asia_end)
-        london = _in_window(minute_of_day, london_start, london_end)
-        new_york = _in_window(minute_of_day, new_york_start, new_york_end)
+        broker_dt = datetime.strptime(str(raw_time), _TIME_FORMAT).replace(tzinfo=broker_zone)
+        asia_dt = broker_dt.astimezone(asia_zone)
+        london_dt = broker_dt.astimezone(london_zone)
+        new_york_dt = broker_dt.astimezone(new_york_zone)
 
-        broker_date.append(dt.date().isoformat())
-        years.append(dt.year)
-        months.append(dt.month)
-        weekdays.append(dt.weekday())
-        hours.append(dt.hour)
-        minutes.append(dt.minute)
+        asia_minute = asia_dt.hour * 60 + asia_dt.minute
+        london_minute = london_dt.hour * 60 + london_dt.minute
+        new_york_minute = new_york_dt.hour * 60 + new_york_dt.minute
+        asia = _in_window(asia_minute, asia_start, asia_end)
+        london = _in_window(london_minute, london_start, london_end)
+        new_york = _in_window(new_york_minute, new_york_start, new_york_end)
+
+        broker_date.append(broker_dt.date().isoformat())
+        years.append(broker_dt.year)
+        months.append(broker_dt.month)
+        weekdays.append(broker_dt.weekday())
+        hours.append(broker_dt.hour)
+        minutes.append(broker_dt.minute)
         asia_flags.append(asia)
         london_flags.append(london)
         new_york_flags.append(new_york)
