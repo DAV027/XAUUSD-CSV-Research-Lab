@@ -6,6 +6,8 @@ from typing import Callable, Mapping
 
 import numpy as np
 
+from xau_lab.signals import signal_domain_is_valid
+
 SignalFunction = Callable[["StrategyContext", dict], np.ndarray]
 
 
@@ -79,14 +81,17 @@ class StrategyDefinition:
         signal = np.asarray(self.signal(ctx, dict(params)))
         if signal.ndim != 1 or len(signal) != len(ctx):
             raise ValueError("strategy signal length must equal context length")
-        if not np.isin(signal, (-1, 0, 1)).all():
+        if not signal_domain_is_valid(signal):
             raise ValueError("strategy signals must contain only -1, 0, 1")
+
         filtered = np.ascontiguousarray(signal, dtype=np.int8)
         entry_allowed = ctx.features.get("entry_allowed")
         if entry_allowed is not None:
             allowed = np.asarray(entry_allowed, dtype=np.bool_)
             if len(allowed) != len(filtered):
                 raise ValueError("entry_allowed feature length must equal context length")
+            # The signal may alias strategy-owned/read-only storage. Only allocate
+            # a private writable copy when the integrity mask must mutate it.
             filtered = filtered.copy()
-            filtered[~allowed] = 0
+            np.putmask(filtered, np.logical_not(allowed), 0)
         return filtered
