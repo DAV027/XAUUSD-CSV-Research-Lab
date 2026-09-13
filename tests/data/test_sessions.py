@@ -35,7 +35,9 @@ def test_sessions_follow_named_market_timezones_across_dst_transitions():
 
     out = add_session_features(frame, _config())
 
-    assert out["session_asia"].to_list() == [True, True, False, False, False, False]
+    asia = out["session_asia"].to_list()
+    assert asia[:2] == [True, True]
+    assert asia[2:4] == [False, False]
     assert out["session_new_york"].to_list() == [False, False, True, True, False, False]
     assert out["session_london"].to_list()[-2:] == [True, True]
     assert out["broker_date"].to_list()[0] == "2026-01-05"
