@@ -313,7 +313,7 @@ reference_volatility_expansion_direction
 reference_volatility_contraction_reversion
 ```
 
-- [ ] **Step 2: Add RED equivalence tests across finite and adversarial contexts**
+- [ ] **Step 2: Add exact equivalence tests across finite and adversarial contexts**
 
 Add:
 
@@ -411,7 +411,7 @@ Expected: exact signal arrays and existing golden tests all pass.
 
 - [ ] **Step 7: Run a canonical single-strategy timing probe**
 
-Use `EXP37889369D2F1` only for a sanity timing of the already-profiled breakout? No: this task must time the exact volatility representative from `multi_probe/PROBE_CATALOG.csv` (`EXPA6DA73D5B2BA`) using the read-only profiler pattern. Record signal-generation seconds; do not create campaign results yet.
+Time the exact volatility representative from `multi_probe/PROBE_CATALOG.csv` (`EXPA6DA73D5B2BA`) using the established read-only profiler pattern. Record signal-generation seconds; do not create campaign results yet.
 
 Target: signal time materially below the old `189.002s`. This is an intermediate diagnostic, not a correctness criterion.
 
@@ -518,9 +518,9 @@ Expected: all exact oracle and existing golden tests pass.
 Time only signal generation for:
 
 ```text
-EXPB62F70031929 bollinger_reversion       old 63.789s
+EXPB62F70031929 bollinger_reversion        old 63.789s
 EXPB1A10E7A4435 standardized_return_signal old 66.547s
-EXP2053D4626356 zscore_reversion           old 64.508s
+EXP2053D4626356 zscore_reversion            old 64.508s
 ```
 
 Record new times in the PR conversation after correctness tests pass.
@@ -597,25 +597,65 @@ For EMA slope, reproduce `_ema_of_window` exactly inside Numba; do not substitut
 
 - [ ] **Step 6: Compile breakout bar loops**
 
-Keep `_expanding_linear_quantiles(ranges, q)` as the threshold producer. Add a private kernel that receives the precomputed thresholds and evaluates compressed-window mean plus breakout high/low using compiled loops:
+Keep `_expanding_linear_quantiles(ranges, q)` as the threshold producer. Implement the post-threshold compression/breakout loop explicitly:
 
 ```python
 @njit(cache=True)
 def _compression_breakout_signal_kernel(
     high, low, close, ranges, thresholds, compression_lookback, breakout_lookback
 ):
-    out = np.zeros(len(close), dtype=np.int8)
+    n = len(close)
+    out = np.zeros(n, dtype=np.int8)
     warmup = max(compression_lookback, breakout_lookback)
-    for i in range(warmup, len(close)):
-        # validate and sum ranges[i-compression_lookback:i]
-        # validate/max high[i-breakout_lookback:i]
-        # validate/min low[i-breakout_lookback:i]
-        # preserve `mean > threshold` skip and strict close breakout comparisons
-        pass
+
+    for i in range(warmup, n):
+        threshold = thresholds[i]
+        if not np.isfinite(threshold):
+            continue
+
+        compressed_sum = 0.0
+        compressed_valid = True
+        for j in range(i - compression_lookback, i):
+            value = ranges[j]
+            if not np.isfinite(value):
+                compressed_valid = False
+                break
+            compressed_sum += value
+        if not compressed_valid:
+            continue
+        if compressed_sum / compression_lookback > threshold:
+            continue
+
+        prior_high = high[i - breakout_lookback]
+        prior_low = low[i - breakout_lookback]
+        if not np.isfinite(prior_high) or not np.isfinite(prior_low):
+            continue
+        levels_valid = True
+        for j in range(i - breakout_lookback + 1, i):
+            h = high[j]
+            l = low[j]
+            if not np.isfinite(h) or not np.isfinite(l):
+                levels_valid = False
+                break
+            if h > prior_high:
+                prior_high = h
+            if l < prior_low:
+                prior_low = l
+        if not levels_valid:
+            continue
+
+        current_close = close[i]
+        if not np.isfinite(current_close):
+            continue
+        if current_close > prior_high:
+            out[i] = 1
+        elif current_close < prior_low:
+            out[i] = -1
+
     return out
 ```
 
-In the actual implementation, replace the comment block and `pass` with explicit compiled loops; no Python bar loop may remain in `compression_breakout`.
+Use the same explicit-loop style for `nbar_breakout`, `nbar_failed_breakout`, and `range_expansion`. For `bollinger_expansion`, compile both the rolling-bandwidth calculation and the prior-bandwidth quantile comparison; preserve its inclusive-current band window and strict-prior bandwidth-percentile window exactly.
 
 - [ ] **Step 7: Run GREEN tests**
 
@@ -633,7 +673,7 @@ Expected: exact equality and all existing exact expanding-quantile tests pass.
 Time signal generation for:
 
 ```text
-EXP1E2D424171EC regression_slope    old 36.541s
+EXP1E2D424171EC regression_slope     old 36.541s
 EXP37889369D2F1 compression_breakout old 35.094s
 ```
 
@@ -782,15 +822,15 @@ zscore_reversion                   64.508s
 
 Create a fresh result namespace, run `scripts.run_campaign` with the same 8-row probe catalog and `--workers 2`, then compare each new `MASTER_RESULTS.csv` row against the last known-good 8-row run for all common stored fields. Require zero differences for every experiment and zero `ERRORS.csv` rows.
 
-If the old `multi_probe/results` is no longer available locally, compare the seven non-session experiments against the pre-session 8-probe output only if that artifact was retained and compare the session experiment against the approved post-session output; otherwise rerun the approved baseline commit in an isolated worktree before accepting parity. Do not guess historical values.
+If the old `multi_probe/results` is no longer available locally, compare the seven non-session experiments against the retained pre-session probe only if that artifact exists and compare the session experiment against the approved post-session output. If no trustworthy baseline artifact remains, rerun baseline commit `d6dbc5bc8a261c70373ba59c05de0414f143bb0a` in an isolated worktree and use that output as the parity source. Do not reconstruct or guess historical values.
 
 - [ ] **Step 5: Evaluate the intermediate gate**
 
 Compute aggregate profile seconds. If signal generation has not dropped enough to make the 24-hour target plausible, stop before 100-smoke and profile the remaining hot strategy implementations. Do not add shared caching without a new design review.
 
-- [ ] **Step 6: Commit verification notes only if repository documentation is intentionally updated**
+- [ ] **Step 6: Record verification evidence**
 
-No code commit is required solely for local benchmark output. Record canonical evidence in the PR conversation rather than committing machine-specific result files.
+No code commit is required solely for machine-specific benchmark output. Post exact canonical timing/parity evidence to PR #16 instead of committing local result files.
 
 ---
 
