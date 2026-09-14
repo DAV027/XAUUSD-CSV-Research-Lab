@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import date
 from types import MappingProxyType
 from typing import Mapping
 
@@ -22,19 +23,108 @@ from xau_lab.strategies.base import StrategyContext
 from xau_lab.strategies.registry import get_strategy
 
 
+def _calendar_group_ids_from_dates(
+    values: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    dates = np.asarray(values, dtype=object)
+    day = np.empty(len(dates), dtype=np.int32)
+    month = np.empty(len(dates), dtype=np.int32)
+    year = np.empty(len(dates), dtype=np.int32)
+    day_ids: dict[str, int] = {}
+    month_ids: dict[str, int] = {}
+    year_ids: dict[str, int] = {}
+    for index, value in enumerate(dates):
+        current = str(value)
+        day[index] = day_ids.setdefault(current, len(day_ids))
+        month_key = current[:7]
+        month[index] = month_ids.setdefault(month_key, len(month_ids))
+        year_key = current[:4]
+        year[index] = year_ids.setdefault(year_key, len(year_ids))
+    return day, month, year
+
+
+def _validate_broker_dates(values: np.ndarray) -> None:
+    if len(values) == 0:
+        return
+    changed = np.ones(len(values), dtype=np.bool_)
+    changed[1:] = values[1:] != values[:-1]
+    for value in values[changed]:
+        current = str(value)
+        if len(current) != 10 or current[4] != "-" or current[7] != "-":
+            raise ValueError("broker_date must use valid YYYY-MM-DD dates")
+        try:
+            date.fromisoformat(current)
+        except ValueError as exc:
+            raise ValueError("broker_date must use valid YYYY-MM-DD dates") from exc
+
+
+def _normalize_calendar_group_ids(name: str, values: np.ndarray, size: int) -> np.ndarray:
+    array = np.asarray(values)
+    if array.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional")
+    if len(array) != size:
+        raise ValueError(f"{name} length must match market bars")
+    if not np.issubdtype(array.dtype, np.integer):
+        raise ValueError(f"{name} must contain integers")
+    if len(array):
+        if np.min(array) < 0:
+            raise ValueError(f"{name} must be nonnegative")
+        if np.max(array) > np.iinfo(np.int32).max:
+            raise ValueError(f"{name} values must fit int32")
+        if np.all(array[1:] >= array[:-1]):
+            compact = array[0] == 0 and np.all(np.diff(array) <= 1)
+        else:
+            unique = np.unique(array)
+            compact = unique[0] == 0 and np.all(np.diff(unique) == 1)
+        if not compact:
+            raise ValueError(f"{name} must use compact IDs starting at zero")
+    return np.ascontiguousarray(array, dtype=np.int32)
+
+
 @dataclass(frozen=True)
 class MarketBundle:
     bars: MarketBars
     symbol: SymbolSpec
     broker_date: np.ndarray
     features: Mapping[str, np.ndarray]
+    broker_day_id: np.ndarray | None = None
+    broker_month_id: np.ndarray | None = None
+    broker_year_id: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         broker_date = np.asarray(self.broker_date, dtype=object)
+        if broker_date.ndim != 1:
+            raise ValueError("broker_date must be one-dimensional")
         if len(broker_date) != len(self.bars):
             raise ValueError("broker_date length must match market bars")
+        _validate_broker_dates(broker_date)
         broker_date.setflags(write=False)
         object.__setattr__(self, "broker_date", broker_date)
+        supplied_ids = (self.broker_day_id, self.broker_month_id, self.broker_year_id)
+        if any(values is None for values in supplied_ids) and not all(
+            values is None for values in supplied_ids
+        ):
+            raise ValueError("calendar group IDs must be provided together")
+        if all(values is None for values in supplied_ids):
+            day, month, year = _calendar_group_ids_from_dates(broker_date)
+        else:
+            assert all(values is not None for values in supplied_ids)
+            day = _normalize_calendar_group_ids(
+                "broker_day_id", supplied_ids[0], len(self.bars)
+            )
+            month = _normalize_calendar_group_ids(
+                "broker_month_id", supplied_ids[1], len(self.bars)
+            )
+            year = _normalize_calendar_group_ids(
+                "broker_year_id", supplied_ids[2], len(self.bars)
+            )
+        for name, values in (
+            ("broker_day_id", day),
+            ("broker_month_id", month),
+            ("broker_year_id", year),
+        ):
+            values.setflags(write=False)
+            object.__setattr__(self, name, values)
         feature_map: dict[str, np.ndarray] = {}
         for name, values in self.features.items():
             array = np.ascontiguousarray(values)
