@@ -7,6 +7,7 @@ import numpy as np
 from numba import njit
 
 from xau_lab.backtest.models import BacktestResult, CostModel, ExitSpec, MarketBars, RiskModel, SymbolSpec
+from xau_lab.backtest.packed import PackedBacktestResult
 from xau_lab.backtest.reference import _Position, _finalize_trade
 from xau_lab.signals import normalize_signal_array
 
@@ -394,14 +395,14 @@ def _kernel(
     )
 
 
-def run_fast_backtest(
+def run_packed_backtest(
     bars: MarketBars,
     signals: Sequence[int],
     symbol: SymbolSpec,
     cost: CostModel,
     risk: RiskModel,
     exit_spec: ExitSpec,
-) -> BacktestResult:
+) -> PackedBacktestResult:
     raw_signals = np.asarray(signals)
     if raw_signals.ndim != 1 or len(raw_signals) != len(bars):
         raise ValueError("signals length must match MarketBars")
@@ -412,7 +413,7 @@ def run_fast_backtest(
     trail = -1.0 if exit_spec.atr_trail is None else float(exit_spec.atr_trail)
     output_capacity = int(np.count_nonzero(signal_array))
 
-    packed = _kernel(
+    values = _kernel(
         bars.time_epoch,
         bars.open,
         bars.high,
@@ -438,49 +439,46 @@ def run_fast_backtest(
         trail,
         output_capacity,
     )
+    return PackedBacktestResult(*values)
 
-    (
-        trade_count,
-        risk_skip_count,
-        directions,
-        signal_indices,
-        entry_indices,
-        exit_indices,
-        raw_entries,
-        entry_prices,
-        initial_stops,
-        targets,
-        lots,
-        planned_risks,
-        raw_exits,
-        reasons,
-    ) = packed
-
+def _materialize_packed_trades(packed, bars, symbol, cost):
     trades = []
-    for i in range(int(trade_count)):
-        target = None if np.isnan(targets[i]) else float(targets[i])
+    for i in range(packed.trade_count):
+        target = None if np.isnan(packed.target[i]) else float(packed.target[i])
         position = _Position(
-            direction=int(directions[i]),
-            signal_index=int(signal_indices[i]),
-            entry_index=int(entry_indices[i]),
-            raw_entry_bid=float(raw_entries[i]),
-            entry_price=float(entry_prices[i]),
-            initial_stop=float(initial_stops[i]),
-            active_stop=float(initial_stops[i]),
+            direction=int(packed.direction[i]),
+            signal_index=int(packed.signal_index[i]),
+            entry_index=int(packed.entry_index[i]),
+            raw_entry_bid=float(packed.raw_entry[i]),
+            entry_price=float(packed.entry_price[i]),
+            initial_stop=float(packed.initial_stop[i]),
+            active_stop=float(packed.initial_stop[i]),
             target_price=target,
-            lot=float(lots[i]),
-            planned_risk_usd=float(planned_risks[i]),
+            lot=float(packed.lot[i]),
+            planned_risk_usd=float(packed.planned_risk[i]),
         )
         trades.append(
             _finalize_trade(
                 position,
                 bars,
-                int(exit_indices[i]),
-                float(raw_exits[i]),
-                _REASON[int(reasons[i])],
+                int(packed.exit_index[i]),
+                float(packed.raw_exit[i]),
+                _REASON[int(packed.reason[i])],
                 symbol,
                 cost,
             )
         )
+    return tuple(trades)
 
-    return BacktestResult(tuple(trades), risk_skip_count=int(risk_skip_count))
+
+def run_fast_backtest(
+    bars: MarketBars,
+    signals: Sequence[int],
+    symbol: SymbolSpec,
+    cost: CostModel,
+    risk: RiskModel,
+    exit_spec: ExitSpec,
+) -> BacktestResult:
+    packed = run_packed_backtest(bars, signals, symbol, cost, risk, exit_spec)
+    trades = _materialize_packed_trades(packed, bars, symbol, cost)
+    return BacktestResult(trades, risk_skip_count=packed.risk_skip_count)
