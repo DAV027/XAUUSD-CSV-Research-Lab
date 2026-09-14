@@ -2,11 +2,29 @@ from __future__ import annotations
 
 from hashlib import sha256
 from pathlib import Path
+import subprocess
+import sys
 
 import polars as pl
 import pytest
 
 from scripts.recover_canonical_features import promote_if_sha_matches, select_research_prefix
+
+
+def test_recovery_script_runs_as_direct_cli_entrypoint() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "recover_canonical_features.py"
+
+    completed = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Recover the frozen canonical XAUUSD feature artifact" in completed.stdout
 
 
 def test_select_research_prefix_filters_before_taking_exact_row_count() -> None:
