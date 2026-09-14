@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
+from tests.strategies.reference_signals import (
+    reference_atr_percentile_regime,
+    reference_volatility_contraction_reversion,
+    reference_volatility_expansion_direction,
+)
 from xau_lab.strategies._kernels import (
     _body_direction,
     _linear_quantile_sorted_window,
@@ -10,6 +16,11 @@ from xau_lab.strategies._kernels import (
     _window_min_max,
 )
 from xau_lab.strategies.base import StrategyContext
+from xau_lab.strategies.volatility import (
+    atr_percentile_regime,
+    volatility_contraction_reversion,
+    volatility_expansion_direction,
+)
 
 
 def random_context(seed: int = 9215000, n: int = 4096) -> StrategyContext:
@@ -123,3 +134,59 @@ def test_body_direction_matches_baseline_boundaries():
     assert _body_direction(1.0, 1.0) == np.int8(0)
     assert _body_direction(np.nan, 1.0) == np.int8(0)
     assert _body_direction(1.0, np.inf) == np.int8(0)
+
+
+@pytest.mark.parametrize(
+    "optimized,reference,params",
+    [
+        (
+            atr_percentile_regime,
+            reference_atr_percentile_regime,
+            {"lookback": 37, "percentile": 0.731},
+        ),
+        (
+            volatility_expansion_direction,
+            reference_volatility_expansion_direction,
+            {"lookback": 41, "range_multiple": 1.83},
+        ),
+        (
+            volatility_contraction_reversion,
+            reference_volatility_contraction_reversion,
+            {"lookback": 53, "percentile": 0.236588625},
+        ),
+    ],
+)
+def test_volatility_kernel_signal_equivalence(optimized, reference, params):
+    for market in (random_context(), adversarial_context()):
+        assert_signal_equal(reference, optimized, market, params)
+
+
+@pytest.mark.parametrize(
+    "optimized,reference,params",
+    [
+        (atr_percentile_regime, reference_atr_percentile_regime, {"lookback": 10, "percentile": 0.5}),
+        (atr_percentile_regime, reference_atr_percentile_regime, {"lookback": 200, "percentile": 0.95}),
+        (
+            volatility_expansion_direction,
+            reference_volatility_expansion_direction,
+            {"lookback": 5, "range_multiple": 1.1},
+        ),
+        (
+            volatility_expansion_direction,
+            reference_volatility_expansion_direction,
+            {"lookback": 100, "range_multiple": 3.0},
+        ),
+        (
+            volatility_contraction_reversion,
+            reference_volatility_contraction_reversion,
+            {"lookback": 5, "percentile": 0.05},
+        ),
+        (
+            volatility_contraction_reversion,
+            reference_volatility_contraction_reversion,
+            {"lookback": 100, "percentile": 0.40},
+        ),
+    ],
+)
+def test_volatility_parameter_boundaries_match_reference(optimized, reference, params):
+    assert_signal_equal(reference, optimized, random_context(seed=73119), params)
