@@ -3,8 +3,13 @@ from __future__ import annotations
 import argparse
 from hashlib import sha256
 from pathlib import Path
+import sys
 
 import polars as pl
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.build_features import load_session_config
 from xau_lab.data.features import build_shared_features, filter_research_window
