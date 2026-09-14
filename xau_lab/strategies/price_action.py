@@ -1,22 +1,36 @@
 from __future__ import annotations
 
 import numpy as np
+from numba import njit
 
+from xau_lab.strategies._kernels import _window_min_max
 from xau_lab.strategies.base import StrategyContext, StrategyDefinition
 from xau_lab.strategies.registry import register_strategy
 
 
-def engulfing(ctx: StrategyContext, params: dict) -> np.ndarray:
-    min_body_atr = float(params.get("min_body_atr", 0.0))
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(1, len(ctx)):
-        values = np.array(
-            [ctx.open[i - 1], ctx.close[i - 1], ctx.open[i], ctx.close[i], ctx.atr14[i]],
-            dtype=float,
-        )
-        if not np.isfinite(values).all() or ctx.atr14[i] <= 0.0:
+@njit(cache=True)
+def _engulfing_kernel(
+    open_: np.ndarray,
+    close: np.ndarray,
+    atr14: np.ndarray,
+    min_body_atr: float,
+) -> np.ndarray:
+    out = np.zeros(len(close), dtype=np.int8)
+    for i in range(1, len(close)):
+        prev_open = open_[i - 1]
+        prev_close = close[i - 1]
+        cur_open = open_[i]
+        cur_close = close[i]
+        atr = atr14[i]
+        if (
+            not np.isfinite(prev_open)
+            or not np.isfinite(prev_close)
+            or not np.isfinite(cur_open)
+            or not np.isfinite(cur_close)
+            or not np.isfinite(atr)
+            or atr <= 0.0
+        ):
             continue
-        prev_open, prev_close, cur_open, cur_close, atr = map(float, values)
         body = abs(cur_close - cur_open)
         if body < min_body_atr * atr:
             continue
@@ -39,87 +53,165 @@ def engulfing(ctx: StrategyContext, params: dict) -> np.ndarray:
     return out
 
 
-def rejection_candle(ctx: StrategyContext, params: dict) -> np.ndarray:
-    ratio = float(params.get("wick_body_ratio", 2.0))
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(len(ctx)):
-        values = np.array([ctx.open[i], ctx.high[i], ctx.low[i], ctx.close[i]], dtype=float)
-        if not np.isfinite(values).all():
+@njit(cache=True)
+def _rejection_candle_kernel(
+    open_: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    ratio: float,
+) -> np.ndarray:
+    out = np.zeros(len(close), dtype=np.int8)
+    for i in range(len(close)):
+        current_open = open_[i]
+        current_high = high[i]
+        current_low = low[i]
+        current_close = close[i]
+        if (
+            not np.isfinite(current_open)
+            or not np.isfinite(current_high)
+            or not np.isfinite(current_low)
+            or not np.isfinite(current_close)
+        ):
             continue
-        open_, high, low, close = map(float, values)
-        body = abs(close - open_)
+        body = abs(current_close - current_open)
         if body <= 0.0:
             continue
-        upper = high - max(open_, close)
-        lower = min(open_, close) - low
-        if lower >= ratio * body and lower > upper and close > open_:
+        upper = current_high - max(current_open, current_close)
+        lower = min(current_open, current_close) - current_low
+        if lower >= ratio * body and lower > upper and current_close > current_open:
             out[i] = 1
-        elif upper >= ratio * body and upper > lower and close < open_:
+        elif upper >= ratio * body and upper > lower and current_close < current_open:
             out[i] = -1
     return out
+
+
+@njit(cache=True)
+def _inside_bar_break_kernel(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    atr14: np.ndarray,
+    buffer_atr: float,
+) -> np.ndarray:
+    out = np.zeros(len(close), dtype=np.int8)
+    for i in range(2, len(close)):
+        mother_high = high[i - 2]
+        mother_low = low[i - 2]
+        inside_high = high[i - 1]
+        inside_low = low[i - 1]
+        current_close = close[i]
+        atr = atr14[i]
+        if (
+            not np.isfinite(mother_high)
+            or not np.isfinite(mother_low)
+            or not np.isfinite(inside_high)
+            or not np.isfinite(inside_low)
+            or not np.isfinite(current_close)
+            or not np.isfinite(atr)
+            or atr <= 0.0
+        ):
+            continue
+        if inside_high > mother_high or inside_low < mother_low:
+            continue
+        buffer = buffer_atr * atr
+        if current_close > mother_high + buffer:
+            out[i] = 1
+        elif current_close < mother_low - buffer:
+            out[i] = -1
+    return out
+
+
+@njit(cache=True)
+def _outside_bar_kernel(
+    open_: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    atr14: np.ndarray,
+    min_range_atr: float,
+) -> np.ndarray:
+    out = np.zeros(len(close), dtype=np.int8)
+    for i in range(1, len(close)):
+        current_open = open_[i]
+        current_high = high[i]
+        current_low = low[i]
+        current_close = close[i]
+        prev_high = high[i - 1]
+        prev_low = low[i - 1]
+        atr = atr14[i]
+        if (
+            not np.isfinite(current_open)
+            or not np.isfinite(current_high)
+            or not np.isfinite(current_low)
+            or not np.isfinite(current_close)
+            or not np.isfinite(prev_high)
+            or not np.isfinite(prev_low)
+            or not np.isfinite(atr)
+            or atr <= 0.0
+        ):
+            continue
+        if current_high <= prev_high or current_low >= prev_low or (current_high - current_low) < min_range_atr * atr:
+            continue
+        if current_close > current_open:
+            out[i] = 1
+        elif current_close < current_open:
+            out[i] = -1
+    return out
+
+
+@njit(cache=True)
+def _level_sweep_reclaim_kernel(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    lookback: int,
+) -> np.ndarray:
+    out = np.zeros(len(close), dtype=np.int8)
+    for i in range(lookback, len(close)):
+        highs_valid, _, prior_high = _window_min_max(high, i - lookback, i)
+        lows_valid, prior_low, _ = _window_min_max(low, i - lookback, i)
+        current_high = high[i]
+        current_low = low[i]
+        current_close = close[i]
+        if (
+            not highs_valid
+            or not lows_valid
+            or not np.isfinite(current_high)
+            or not np.isfinite(current_low)
+            or not np.isfinite(current_close)
+        ):
+            continue
+        if current_low < prior_low and current_close > prior_low:
+            out[i] = 1
+        elif current_high > prior_high and current_close < prior_high:
+            out[i] = -1
+    return out
+
+
+def engulfing(ctx: StrategyContext, params: dict) -> np.ndarray:
+    min_body_atr = float(params.get("min_body_atr", 0.0))
+    return _engulfing_kernel(ctx.open, ctx.close, ctx.atr14, min_body_atr)
+
+
+def rejection_candle(ctx: StrategyContext, params: dict) -> np.ndarray:
+    ratio = float(params.get("wick_body_ratio", 2.0))
+    return _rejection_candle_kernel(ctx.open, ctx.high, ctx.low, ctx.close, ratio)
 
 
 def inside_bar_break(ctx: StrategyContext, params: dict) -> np.ndarray:
     buffer_atr = float(params.get("break_buffer_atr", 0.0))
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(2, len(ctx)):
-        values = np.array(
-            [
-                ctx.high[i - 2], ctx.low[i - 2], ctx.high[i - 1], ctx.low[i - 1],
-                ctx.close[i], ctx.atr14[i],
-            ],
-            dtype=float,
-        )
-        if not np.isfinite(values).all() or ctx.atr14[i] <= 0.0:
-            continue
-        mother_high, mother_low, inside_high, inside_low, close, atr = map(float, values)
-        if inside_high > mother_high or inside_low < mother_low:
-            continue
-        buffer = buffer_atr * atr
-        if close > mother_high + buffer:
-            out[i] = 1
-        elif close < mother_low - buffer:
-            out[i] = -1
-    return out
+    return _inside_bar_break_kernel(ctx.high, ctx.low, ctx.close, ctx.atr14, buffer_atr)
 
 
 def outside_bar(ctx: StrategyContext, params: dict) -> np.ndarray:
     min_range_atr = float(params.get("min_range_atr", 0.0))
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(1, len(ctx)):
-        values = np.array(
-            [ctx.open[i], ctx.high[i], ctx.low[i], ctx.close[i], ctx.high[i - 1], ctx.low[i - 1], ctx.atr14[i]],
-            dtype=float,
-        )
-        if not np.isfinite(values).all() or ctx.atr14[i] <= 0.0:
-            continue
-        open_, high, low, close, prev_high, prev_low, atr = map(float, values)
-        if high <= prev_high or low >= prev_low or (high - low) < min_range_atr * atr:
-            continue
-        if close > open_:
-            out[i] = 1
-        elif close < open_:
-            out[i] = -1
-    return out
+    return _outside_bar_kernel(ctx.open, ctx.high, ctx.low, ctx.close, ctx.atr14, min_range_atr)
 
 
 def level_sweep_reclaim(ctx: StrategyContext, params: dict) -> np.ndarray:
     lookback = int(params["lookback"])
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(lookback, len(ctx)):
-        prior_highs = ctx.high[i - lookback : i]
-        prior_lows = ctx.low[i - lookback : i]
-        values = np.array([ctx.high[i], ctx.low[i], ctx.close[i]], dtype=float)
-        if not np.isfinite(prior_highs).all() or not np.isfinite(prior_lows).all() or not np.isfinite(values).all():
-            continue
-        prior_high = float(np.max(prior_highs))
-        prior_low = float(np.min(prior_lows))
-        high, low, close = map(float, values)
-        if low < prior_low and close > prior_low:
-            out[i] = 1
-        elif high > prior_high and close < prior_high:
-            out[i] = -1
-    return out
+    return _level_sweep_reclaim_kernel(ctx.high, ctx.low, ctx.close, lookback)
 
 
 register_strategy(StrategyDefinition("price_action", "engulfing", engulfing, {"min_body_atr": (0.0, 1.0)}))
