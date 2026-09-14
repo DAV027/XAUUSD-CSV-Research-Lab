@@ -1,69 +1,133 @@
 from __future__ import annotations
 
 import numpy as np
+from numba import njit
 
+from xau_lab.strategies._kernels import _body_direction, _linear_quantile_sorted_window
 from xau_lab.strategies.base import StrategyContext, StrategyDefinition
 from xau_lab.strategies.registry import register_strategy
 
 
-def _direction_from_body(ctx: StrategyContext, i: int) -> np.int8:
-    open_ = float(ctx.open[i])
-    close = float(ctx.close[i])
-    if not np.isfinite(open_) or not np.isfinite(close):
-        return np.int8(0)
-    if close > open_:
-        return np.int8(1)
-    if close < open_:
-        return np.int8(-1)
-    return np.int8(0)
+@njit(cache=True)
+def _atr_percentile_regime_kernel(
+    open_: np.ndarray,
+    close: np.ndarray,
+    atr14: np.ndarray,
+    lookback: int,
+    percentile: float,
+) -> np.ndarray:
+    n = len(close)
+    out = np.zeros(n, dtype=np.int8)
+    scratch = np.empty(lookback, dtype=np.float64)
+    for i in range(lookback, n):
+        current = atr14[i]
+        if not np.isfinite(current):
+            continue
+        threshold = _linear_quantile_sorted_window(
+            atr14,
+            i - lookback,
+            i,
+            percentile,
+            scratch,
+        )
+        if not np.isfinite(threshold):
+            continue
+        if current >= threshold:
+            out[i] = _body_direction(open_[i], close[i])
+    return out
+
+
+@njit(cache=True)
+def _volatility_expansion_direction_kernel(
+    open_: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    lookback: int,
+    multiple: float,
+) -> np.ndarray:
+    n = len(close)
+    out = np.zeros(n, dtype=np.int8)
+    ranges = high - low
+    scratch = np.empty(lookback, dtype=np.float64)
+    for i in range(lookback, n):
+        current = ranges[i]
+        if not np.isfinite(current):
+            continue
+        baseline = _linear_quantile_sorted_window(
+            ranges,
+            i - lookback,
+            i,
+            0.5,
+            scratch,
+        )
+        if not np.isfinite(baseline):
+            continue
+        if baseline > 0.0 and current >= multiple * baseline:
+            out[i] = _body_direction(open_[i], close[i])
+    return out
+
+
+@njit(cache=True)
+def _volatility_contraction_reversion_kernel(
+    open_: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    lookback: int,
+    percentile: float,
+) -> np.ndarray:
+    n = len(close)
+    out = np.zeros(n, dtype=np.int8)
+    ranges = high - low
+    scratch = np.empty(lookback, dtype=np.float64)
+    for i in range(lookback, n):
+        current = ranges[i]
+        if not np.isfinite(current):
+            continue
+        threshold = _linear_quantile_sorted_window(
+            ranges,
+            i - lookback,
+            i,
+            percentile,
+            scratch,
+        )
+        if not np.isfinite(threshold) or current > threshold:
+            continue
+        out[i] = np.int8(-_body_direction(open_[i], close[i]))
+    return out
 
 
 def atr_percentile_regime(ctx: StrategyContext, params: dict) -> np.ndarray:
-    lookback = int(params["lookback"])
-    percentile = float(params["percentile"])
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(lookback, len(ctx)):
-        prior = ctx.atr14[i - lookback : i]
-        current = float(ctx.atr14[i])
-        if not np.isfinite(prior).all() or not np.isfinite(current):
-            continue
-        threshold = float(np.quantile(prior, percentile))
-        if current >= threshold:
-            out[i] = _direction_from_body(ctx, i)
-    return out
+    return _atr_percentile_regime_kernel(
+        ctx.open,
+        ctx.close,
+        ctx.atr14,
+        int(params["lookback"]),
+        float(params["percentile"]),
+    )
 
 
 def volatility_expansion_direction(ctx: StrategyContext, params: dict) -> np.ndarray:
-    lookback = int(params["lookback"])
-    multiple = float(params["range_multiple"])
-    ranges = np.asarray(ctx.high - ctx.low, dtype=np.float64)
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(lookback, len(ctx)):
-        prior = ranges[i - lookback : i]
-        current = float(ranges[i])
-        if not np.isfinite(prior).all() or not np.isfinite(current):
-            continue
-        baseline = float(np.median(prior))
-        if baseline > 0.0 and current >= multiple * baseline:
-            out[i] = _direction_from_body(ctx, i)
-    return out
+    return _volatility_expansion_direction_kernel(
+        ctx.open,
+        ctx.high,
+        ctx.low,
+        ctx.close,
+        int(params["lookback"]),
+        float(params["range_multiple"]),
+    )
 
 
 def volatility_contraction_reversion(ctx: StrategyContext, params: dict) -> np.ndarray:
-    lookback = int(params["lookback"])
-    percentile = float(params["percentile"])
-    ranges = np.asarray(ctx.high - ctx.low, dtype=np.float64)
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(lookback, len(ctx)):
-        prior = ranges[i - lookback : i]
-        current = float(ranges[i])
-        if not np.isfinite(prior).all() or not np.isfinite(current):
-            continue
-        threshold = float(np.quantile(prior, percentile))
-        if current <= threshold:
-            direction = _direction_from_body(ctx, i)
-            out[i] = np.int8(-direction)
-    return out
+    return _volatility_contraction_reversion_kernel(
+        ctx.open,
+        ctx.high,
+        ctx.low,
+        ctx.close,
+        int(params["lookback"]),
+        float(params["percentile"]),
+    )
 
 
 register_strategy(
