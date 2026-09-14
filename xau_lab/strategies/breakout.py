@@ -5,6 +5,11 @@ import math
 import numpy as np
 from numba import njit
 
+from xau_lab.strategies._kernels import (
+    _linear_quantile_sorted_window,
+    _window_mean_std,
+    _window_min_max,
+)
 from xau_lab.strategies.base import StrategyContext, StrategyDefinition
 from xau_lab.strategies.registry import register_strategy
 
@@ -103,10 +108,8 @@ def _expanding_linear_quantiles_kernel(values: np.ndarray, q: float) -> np.ndarr
     if n <= 1:
         return out
 
-    # The two heaps partition the finite history around the requested floor rank.
-    # Only insertions are required because the quantile is expanding, not rolling.
-    lower = np.empty(n, dtype=np.float64)  # max heap, ranks <= floor(h)
-    upper = np.empty(n, dtype=np.float64)  # min heap, ranks > floor(h)
+    lower = np.empty(n, dtype=np.float64)
+    upper = np.empty(n, dtype=np.float64)
     lower_size = 0
     upper_size = 0
     history_valid = True
@@ -142,7 +145,6 @@ def _expanding_linear_quantiles_kernel(values: np.ndarray, q: float) -> np.ndarr
         else:
             upper_value = upper[0]
             difference = upper_value - lower_value
-            # Match NumPy's stable linear interpolation branch in _lerp.
             if fraction >= 0.5:
                 out[i] = upper_value - difference * (1.0 - fraction)
             else:
@@ -163,153 +165,258 @@ def _expanding_linear_quantiles(values: np.ndarray, q: float) -> np.ndarray:
     return _expanding_linear_quantiles_kernel(array, q)
 
 
-def nbar_breakout(ctx: StrategyContext, params: dict) -> np.ndarray:
-    lookback = int(params["lookback"])
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(lookback, len(ctx)):
-        prior_high = ctx.high[i - lookback : i]
-        prior_low = ctx.low[i - lookback : i]
-        close = float(ctx.close[i])
-        if not _finite(prior_high) or not _finite(prior_low) or not np.isfinite(close):
+@njit(cache=True)
+def _nbar_breakout_kernel(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    lookback: int,
+) -> np.ndarray:
+    out = np.zeros(len(close), dtype=np.int8)
+    for i in range(lookback, len(close)):
+        start = i - lookback
+        valid_high, _, prior_high = _window_min_max(high, start, i)
+        valid_low, prior_low, _ = _window_min_max(low, start, i)
+        current = close[i]
+        if not valid_high or not valid_low or not np.isfinite(current):
             continue
-        if close > float(np.max(prior_high)):
+        if current > prior_high:
             out[i] = 1
-        elif close < float(np.min(prior_low)):
+        elif current < prior_low:
             out[i] = -1
     return out
 
 
-def nbar_failed_breakout(ctx: StrategyContext, params: dict) -> np.ndarray:
-    lookback = int(params["lookback"])
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(lookback, len(ctx)):
-        prior_highs = ctx.high[i - lookback : i]
-        prior_lows = ctx.low[i - lookback : i]
-        if not _finite(prior_highs) or not _finite(prior_lows):
+@njit(cache=True)
+def _nbar_failed_breakout_kernel(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    lookback: int,
+) -> np.ndarray:
+    out = np.zeros(len(close), dtype=np.int8)
+    for i in range(lookback, len(close)):
+        start = i - lookback
+        valid_high, _, prior_high = _window_min_max(high, start, i)
+        valid_low, prior_low, _ = _window_min_max(low, start, i)
+        current_high = high[i]
+        current_low = low[i]
+        current_close = close[i]
+        if (
+            not valid_high
+            or not valid_low
+            or not np.isfinite(current_high)
+            or not np.isfinite(current_low)
+            or not np.isfinite(current_close)
+        ):
             continue
-        high = float(ctx.high[i])
-        low = float(ctx.low[i])
-        close = float(ctx.close[i])
-        if not np.isfinite([high, low, close]).all():
-            continue
-        prior_high = float(np.max(prior_highs))
-        prior_low = float(np.min(prior_lows))
-        if high > prior_high and close < prior_high:
+        if current_high > prior_high and current_close < prior_high:
             out[i] = -1
-        elif low < prior_low and close > prior_low:
+        elif current_low < prior_low and current_close > prior_low:
             out[i] = 1
     return out
 
 
-def _true_ranges(ctx: StrategyContext) -> np.ndarray:
-    n = len(ctx)
+@njit(cache=True)
+def _true_ranges_kernel(high: np.ndarray, low: np.ndarray, close: np.ndarray) -> np.ndarray:
+    n = len(close)
     tr = np.full(n, np.nan, dtype=np.float64)
     if n == 0:
         return tr
-    if np.isfinite(ctx.high[0]) and np.isfinite(ctx.low[0]):
-        tr[0] = float(ctx.high[0] - ctx.low[0])
+    if np.isfinite(high[0]) and np.isfinite(low[0]):
+        tr[0] = high[0] - low[0]
     for i in range(1, n):
-        values = np.array(
-            [
-                ctx.high[i] - ctx.low[i],
-                abs(ctx.high[i] - ctx.close[i - 1]),
-                abs(ctx.low[i] - ctx.close[i - 1]),
-            ],
-            dtype=np.float64,
-        )
-        if np.isfinite(values).all():
-            tr[i] = float(np.max(values))
+        h = high[i]
+        l = low[i]
+        previous_close = close[i - 1]
+        if not np.isfinite(h) or not np.isfinite(l) or not np.isfinite(previous_close):
+            continue
+        a = h - l
+        b = abs(h - previous_close)
+        c = abs(l - previous_close)
+        maximum = a
+        if b > maximum:
+            maximum = b
+        if c > maximum:
+            maximum = c
+        tr[i] = maximum
     return tr
 
 
-def range_expansion(ctx: StrategyContext, params: dict) -> np.ndarray:
-    lookback = int(params["median_lookback"])
-    multiple = float(params["range_multiple"])
-    tr = _true_ranges(ctx)
-    out = np.zeros(len(ctx), dtype=np.int8)
-    for i in range(lookback, len(ctx)):
-        prior = tr[i - lookback : i]
-        if not _finite(prior) or not np.isfinite(tr[i]):
+@njit(cache=True)
+def _range_expansion_kernel(
+    open_: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    lookback: int,
+    multiple: float,
+) -> np.ndarray:
+    tr = _true_ranges_kernel(high, low, close)
+    out = np.zeros(len(close), dtype=np.int8)
+    scratch = np.empty(lookback, dtype=np.float64)
+    for i in range(lookback, len(close)):
+        current = tr[i]
+        if not np.isfinite(current):
             continue
-        median = float(np.median(prior))
-        if median <= 0.0 or tr[i] / median < multiple:
+        median = _linear_quantile_sorted_window(tr, i - lookback, i, 0.5, scratch)
+        if not np.isfinite(median) or median <= 0.0 or current / median < multiple:
             continue
-        body = float(ctx.close[i] - ctx.open[i])
+        body = close[i] - open_[i]
         if np.isfinite(body) and body != 0.0:
-            out[i] = 1 if body > 0.0 else -1
+            out[i] = np.int8(1 if body > 0.0 else -1)
     return out
 
 
-def _band_stats(values: np.ndarray, multiplier: float) -> tuple[float, float, float] | None:
-    if not _finite(values):
-        return None
-    mean = float(np.mean(values))
-    std = float(np.std(values, ddof=0))
-    if mean == 0.0:
-        return None
-    upper = mean + multiplier * std
-    lower = mean - multiplier * std
-    bandwidth = (upper - lower) / abs(mean)
-    return lower, upper, bandwidth
+@njit(cache=True)
+def _bollinger_expansion_kernel(
+    close: np.ndarray,
+    lookback: int,
+    multiplier: float,
+    percentile: float,
+) -> np.ndarray:
+    n = len(close)
+    out = np.zeros(n, dtype=np.int8)
+    bandwidths = np.full(n, np.nan, dtype=np.float64)
+    lowers = np.full(n, np.nan, dtype=np.float64)
+    uppers = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(lookback - 1, n):
+        valid, mean, std = _window_mean_std(close, i - lookback + 1, i + 1)
+        if not valid or mean == 0.0:
+            continue
+        upper = mean + multiplier * std
+        lower = mean - multiplier * std
+        lowers[i] = lower
+        uppers[i] = upper
+        bandwidths[i] = (upper - lower) / abs(mean)
+
+    scratch = np.empty(lookback, dtype=np.float64)
+    for i in range(2 * lookback - 1, n):
+        current_width = bandwidths[i]
+        if not np.isfinite(current_width):
+            continue
+        threshold = _linear_quantile_sorted_window(
+            bandwidths,
+            i - lookback,
+            i,
+            percentile,
+            scratch,
+        )
+        if not np.isfinite(threshold) or current_width < threshold:
+            continue
+        current_close = close[i]
+        if current_close > uppers[i]:
+            out[i] = 1
+        elif current_close < lowers[i]:
+            out[i] = -1
+    return out
+
+
+@njit(cache=True)
+def _compression_breakout_signal_kernel(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    ranges: np.ndarray,
+    thresholds: np.ndarray,
+    compression_lookback: int,
+    breakout_lookback: int,
+) -> np.ndarray:
+    n = len(close)
+    out = np.zeros(n, dtype=np.int8)
+    warmup = max(compression_lookback, breakout_lookback)
+
+    for i in range(warmup, n):
+        threshold = thresholds[i]
+        if not np.isfinite(threshold):
+            continue
+
+        compressed_sum = 0.0
+        compressed_valid = True
+        for j in range(i - compression_lookback, i):
+            value = ranges[j]
+            if not np.isfinite(value):
+                compressed_valid = False
+                break
+            compressed_sum += value
+        if not compressed_valid:
+            continue
+        if compressed_sum / compression_lookback > threshold:
+            continue
+
+        prior_high = high[i - breakout_lookback]
+        prior_low = low[i - breakout_lookback]
+        if not np.isfinite(prior_high) or not np.isfinite(prior_low):
+            continue
+        levels_valid = True
+        for j in range(i - breakout_lookback + 1, i):
+            h = high[j]
+            l = low[j]
+            if not np.isfinite(h) or not np.isfinite(l):
+                levels_valid = False
+                break
+            if h > prior_high:
+                prior_high = h
+            if l < prior_low:
+                prior_low = l
+        if not levels_valid:
+            continue
+
+        current_close = close[i]
+        if not np.isfinite(current_close):
+            continue
+        if current_close > prior_high:
+            out[i] = 1
+        elif current_close < prior_low:
+            out[i] = -1
+
+    return out
+
+
+def nbar_breakout(ctx: StrategyContext, params: dict) -> np.ndarray:
+    return _nbar_breakout_kernel(ctx.high, ctx.low, ctx.close, int(params["lookback"]))
+
+
+def nbar_failed_breakout(ctx: StrategyContext, params: dict) -> np.ndarray:
+    return _nbar_failed_breakout_kernel(ctx.high, ctx.low, ctx.close, int(params["lookback"]))
+
+
+def range_expansion(ctx: StrategyContext, params: dict) -> np.ndarray:
+    return _range_expansion_kernel(
+        ctx.open,
+        ctx.high,
+        ctx.low,
+        ctx.close,
+        int(params["median_lookback"]),
+        float(params["range_multiple"]),
+    )
 
 
 def bollinger_expansion(ctx: StrategyContext, params: dict) -> np.ndarray:
-    lookback = int(params["lookback"])
-    multiplier = float(params["std_multiplier"])
-    percentile = float(params["bandwidth_percentile"])
-    out = np.zeros(len(ctx), dtype=np.int8)
-    bandwidths = np.full(len(ctx), np.nan, dtype=np.float64)
-    lowers = np.full(len(ctx), np.nan, dtype=np.float64)
-    uppers = np.full(len(ctx), np.nan, dtype=np.float64)
-    for i in range(lookback - 1, len(ctx)):
-        stats = _band_stats(ctx.close[i - lookback + 1 : i + 1], multiplier)
-        if stats is not None:
-            lowers[i], uppers[i], bandwidths[i] = stats
-    for i in range(2 * lookback - 1, len(ctx)):
-        prior_widths = bandwidths[i - lookback : i]
-        if not _finite(prior_widths) or not np.isfinite(bandwidths[i]):
-            continue
-        threshold = float(np.quantile(prior_widths, percentile))
-        if bandwidths[i] < threshold:
-            continue
-        close = float(ctx.close[i])
-        if close > uppers[i]:
-            out[i] = 1
-        elif close < lowers[i]:
-            out[i] = -1
-    return out
+    return _bollinger_expansion_kernel(
+        ctx.close,
+        int(params["lookback"]),
+        float(params["std_multiplier"]),
+        float(params["bandwidth_percentile"]),
+    )
 
 
 def compression_breakout(ctx: StrategyContext, params: dict) -> np.ndarray:
     compression_lookback = int(params["compression_lookback"])
     compression_percentile = float(params["compression_percentile"])
     breakout_lookback = int(params["breakout_lookback"])
-    out = np.zeros(len(ctx), dtype=np.int8)
     ranges = np.asarray(ctx.high - ctx.low, dtype=np.float64)
     thresholds = _expanding_linear_quantiles(ranges, compression_percentile)
-    warmup = max(compression_lookback, breakout_lookback)
-    for i in range(warmup, len(ctx)):
-        compressed = ranges[i - compression_lookback : i]
-        breakout_highs = ctx.high[i - breakout_lookback : i]
-        breakout_lows = ctx.low[i - breakout_lookback : i]
-        threshold = thresholds[i]
-        if not (
-            _finite(compressed)
-            and np.isfinite(threshold)
-            and _finite(breakout_highs)
-            and _finite(breakout_lows)
-        ):
-            continue
-        if float(np.mean(compressed)) > threshold:
-            continue
-        close = float(ctx.close[i])
-        if not np.isfinite(close):
-            continue
-        if close > float(np.max(breakout_highs)):
-            out[i] = 1
-        elif close < float(np.min(breakout_lows)):
-            out[i] = -1
-    return out
+    return _compression_breakout_signal_kernel(
+        ctx.high,
+        ctx.low,
+        ctx.close,
+        ranges,
+        thresholds,
+        compression_lookback,
+        breakout_lookback,
+    )
 
 
 register_strategy(StrategyDefinition("breakout", "nbar_breakout", nbar_breakout, {"lookback": (2, 100)}))
