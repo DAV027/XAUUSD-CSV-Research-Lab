@@ -199,6 +199,37 @@ def reference_opening_range_breakout(ctx: StrategyContext, params: dict) -> np.n
     return out
 
 
+def reference_atr_percentile_regime(ctx: StrategyContext, params: dict) -> np.ndarray:
+    lookback = int(params["lookback"])
+    percentile = float(params["percentile"])
+    out = np.zeros(len(ctx), dtype=np.int8)
+    for i in range(lookback, len(ctx)):
+        prior = ctx.atr14[i - lookback : i]
+        current = float(ctx.atr14[i])
+        if not np.isfinite(prior).all() or not np.isfinite(current):
+            continue
+        threshold = float(np.quantile(prior, percentile))
+        if current >= threshold:
+            out[i] = _direction_from_body(ctx, i)
+    return out
+
+
+def reference_volatility_expansion_direction(ctx: StrategyContext, params: dict) -> np.ndarray:
+    lookback = int(params["lookback"])
+    multiple = float(params["range_multiple"])
+    ranges = np.asarray(ctx.high - ctx.low, dtype=np.float64)
+    out = np.zeros(len(ctx), dtype=np.int8)
+    for i in range(lookback, len(ctx)):
+        prior = ranges[i - lookback : i]
+        current = float(ranges[i])
+        if not np.isfinite(prior).all() or not np.isfinite(current):
+            continue
+        baseline = float(np.median(prior))
+        if baseline > 0.0 and current >= multiple * baseline:
+            out[i] = _direction_from_body(ctx, i)
+    return out
+
+
 def reference_volatility_contraction_reversion(ctx: StrategyContext, params: dict) -> np.ndarray:
     lookback = int(params["lookback"])
     percentile = float(params["percentile"])
