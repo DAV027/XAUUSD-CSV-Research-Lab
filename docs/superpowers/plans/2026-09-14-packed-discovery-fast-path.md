@@ -233,12 +233,13 @@ def _materialize_packed_trades(packed, bars, symbol, cost):
     return tuple(trades)
 ```
 
-Replace the body of `run_fast_backtest()` after validation with:
+Replace `run_fast_backtest()` with the compatibility wrapper:
 
 ```python
-packed = run_packed_backtest(bars, signals, symbol, cost, risk, exit_spec)
-trades = _materialize_packed_trades(packed, bars, symbol, cost)
-return BacktestResult(trades, risk_skip_count=packed.risk_skip_count)
+def run_fast_backtest(bars, signals, symbol, cost, risk, exit_spec):
+    packed = run_packed_backtest(bars, signals, symbol, cost, risk, exit_spec)
+    trades = _materialize_packed_trades(packed, bars, symbol, cost)
+    return BacktestResult(trades, risk_skip_count=packed.risk_skip_count)
 ```
 
 - [ ] **Step 6: Run GREEN compatibility tests**
@@ -315,13 +316,11 @@ def _calendar_group_ids_from_dates(values: np.ndarray) -> tuple[np.ndarray, np.n
     year = np.empty(n, dtype=np.int32)
     if n == 0:
         return day, month, year
-
     day_id = month_id = year_id = 0
     previous = str(dates[0])
     if len(previous) != 10 or previous[4] != "-" or previous[7] != "-":
         raise ValueError("broker_date must use YYYY-MM-DD")
     day[0] = month[0] = year[0] = 0
-
     for index in range(1, n):
         current = str(dates[index])
         if len(current) != 10 or current[4] != "-" or current[7] != "-":
@@ -392,7 +391,6 @@ if "year" in frame.columns and "month" in frame.columns:
 else:
     broker_year = np.fromiter((int(str(value)[:4]) for value in broker_date), dtype=np.int32, count=len(broker_date))
     broker_month = np.fromiter((int(str(value)[5:7]) for value in broker_date), dtype=np.int16, count=len(broker_date))
-
 broker_day_id = _contiguous_group_ids(broker_date)
 broker_month_id = _contiguous_group_ids(broker_year, broker_month)
 broker_year_id = _contiguous_group_ids(broker_year)
@@ -444,7 +442,7 @@ git commit -m "perf: precompute broker calendar group ids"
 
 - [ ] **Step 1: Write RED scalar economics parity tests**
 
-In `tests/backtest/test_packed_backtest.py`, import the future `_trade_economics`. For a packed run and its detailed `run_fast_backtest()` oracle, compare each metric-relevant field exactly:
+In `tests/backtest/test_packed_backtest.py`, compare every packed trade against the detailed oracle:
 
 ```python
 for i, trade in enumerate(detailed.trades):
@@ -472,7 +470,7 @@ for i, trade in enumerate(detailed.trades):
     assert slippage_cost == trade.slippage_cost
 ```
 
-Run and confirm import failure before implementation.
+Run and require import failure before implementation.
 
 - [ ] **Step 2: Implement `_trade_economics` exactly**
 
@@ -491,20 +489,8 @@ from xau_lab.backtest.packed import PackedBacktestResult
 
 @njit(cache=True)
 def _trade_economics(
-    i,
-    direction,
-    entry_index,
-    exit_index,
-    raw_entry,
-    lot,
-    planned_risk,
-    raw_exit,
-    spread,
-    time_epoch,
-    point,
-    contract_size,
-    commission_per_lot,
-    slippage_points,
+    i, direction, entry_index, exit_index, raw_entry, lot, planned_risk, raw_exit,
+    spread, time_epoch, point, contract_size, commission_per_lot, slippage_points,
 ):
     d = int(direction[i])
     entry = int(entry_index[i])
@@ -523,9 +509,7 @@ def _trade_economics(
 
 Do not use `fastmath`.
 
-- [ ] **Step 3: Add exact median and optional-value helpers**
-
-Add:
+- [ ] **Step 3: Add exact median and profit-factor helpers**
 
 ```python
 @njit(cache=True)
@@ -548,10 +532,9 @@ def _pf(gross_profit, gross_loss, count):
 
 - [ ] **Step 4: Implement one sequential packed summary kernel**
 
-Implement `_summary_kernel(...)` with these exact rules:
+Allocate:
 
 ```python
-# Allocate only these variable-size helpers:
 hold_values = np.empty(trade_count, dtype=np.float64)
 daily = np.zeros(day_group_count, dtype=np.float64)
 monthly = np.zeros(month_group_count, dtype=np.float64)
@@ -562,18 +545,7 @@ yearly_active = np.zeros(year_group_count, dtype=np.bool_)
 top5 = np.full(5, -np.inf, dtype=np.float64)
 ```
 
-Then loop `for i in range(trade_count)` in trade order. For every trade:
-
-1. call `_trade_economics(...)`,
-2. add positive/negative values to `gross_profit` / `gross_loss`,
-3. update wins/losses and max-loss streak,
-4. update equity, peak, max drawdown USD and percent,
-5. accumulate `sum_net`, `sum_pnl_r`, commission/spread/slippage totals in trade order,
-6. accumulate long/short profit/loss and trade counts in trade order,
-7. save `hold_values[i]`,
-8. get `entry = int(entry_index[i])`, then `day_id = broker_day_id[entry]`, `month_id = broker_month_id[entry]`, `year_id = broker_year_id[entry]`,
-9. add net P/L to those group arrays in trade order and mark them active,
-10. if `net > 0`, insert into `top5` in descending order by shifting lower entries.
+Loop `for i in range(trade_count)` in trade order. For every trade call `_trade_economics(...)`, then update: gross profit/loss; wins/losses; current/max loss streak; equity/peak/drawdown; `sum_net`; `sum_pnl_r`; commission/spread/slippage totals; long/short PF components; `hold_values[i]`; day/month/year P/L via `entry_index`; and top-five positive trades.
 
 Use this exact top-five insertion:
 
@@ -587,9 +559,9 @@ if net > 0.0:
             break
 ```
 
-After the trade loop, copy active daily totals into a compact `daily_values` array in ascending group-ID order and compute `_median_exact(daily_values, active_days)`. Compute monthly/yearly positive fractions by scanning active groups. Compute `worst_month` and `best_month` by scanning active monthly groups. Compute median hold with `_median_exact(hold_values, trade_count)`. Sum finite `top5` values in slot order.
+After the trade loop: copy active day totals into a compact array in ascending group-ID order and call `_median_exact`; scan active month/year arrays for positive fractions, active-month count, worst/best month; call `_median_exact(hold_values, trade_count)`; sum finite top-five slots in slot order.
 
-Return a fixed tuple in this exact order:
+Return exactly:
 
 ```text
 completed_trades, wins, losses, win_rate,
@@ -602,92 +574,38 @@ median_hold_minutes, top_5_trade_profit_fraction, best_month_profit_fraction,
 net_profit, commission_cost, spread_cost, slippage_cost
 ```
 
-Use `np.nan` only for values that are `None` in `summarize_trades()`.
+For the no-trade case, preserve current semantics: zero for counts, gross P/L, drawdown, net/cost totals, and active months; `np.nan` for fields that map to `None`.
 
-- [ ] **Step 5: Implement the Python wrapper and exact dict mapping**
+- [ ] **Step 5: Implement the Python wrapper and dict mapping**
 
-Add:
+Add `_optional(value) -> None | float` using `math.isnan`, validate calendar-array dimensions/lengths and packed entry/exit indices, call `_summary_kernel`, unpack the tuple above, and return exactly the same key set as `summarize_trades()`:
 
 ```python
-def _optional(value: float):
-    return None if math.isnan(float(value)) else float(value)
-
-
-def summarize_packed_backtest(
-    packed: PackedBacktestResult,
-    bars: MarketBars,
-    symbol: SymbolSpec,
-    cost: CostModel,
-    risk: RiskModel,
-    broker_day_id: np.ndarray,
-    broker_month_id: np.ndarray,
-    broker_year_id: np.ndarray,
-) -> dict[str, float | int | None]:
-    day = np.asarray(broker_day_id, dtype=np.int32)
-    month = np.asarray(broker_month_id, dtype=np.int32)
-    year = np.asarray(broker_year_id, dtype=np.int32)
-    if any(values.ndim != 1 or len(values) != len(bars) for values in (day, month, year)):
-        raise ValueError("broker calendar group arrays must be one-dimensional and match market bars")
-    count = packed.trade_count
-    if count:
-        entries = packed.entry_index[:count]
-        exits = packed.exit_index[:count]
-        if np.any(entries < 0) or np.any(entries >= len(bars)) or np.any(exits < 0) or np.any(exits >= len(bars)):
-            raise ValueError("packed trade index exceeds market bars")
-    values = _summary_kernel(
-        count, packed.direction, packed.entry_index, packed.exit_index,
-        packed.raw_entry, packed.lot, packed.planned_risk, packed.raw_exit,
-        bars.spread, bars.time_epoch, float(symbol.point), float(symbol.contract_size),
-        float(cost.commission_round_trip_per_lot), float(cost.slippage_points_per_fill),
-        float(risk.account_equity), day, month, year,
-    )
-    (
-        completed, wins, losses, win_rate,
-        gross_profit, gross_loss, profit_factor, after_cost_profit, expectancy_usd,
-        max_dd_usd, max_dd_pct, max_loss_streak, expectancy_r,
-        profit_per_day, median_day, positive_year, positive_month, active_months, worst_month,
-        long_pf, short_pf, long_trades, short_trades, trades_per_day,
-        median_hold, top5_fraction, best_month_fraction,
-        net_profit, commission_cost, spread_cost, slippage_cost,
-    ) = values
-    return {
-        "completed_trades": int(completed),
-        "wins": int(wins),
-        "losses": int(losses),
-        "win_rate": _optional(win_rate),
-        "gross_profit": float(gross_profit),
-        "gross_loss": float(gross_loss),
-        "profit_factor": _optional(profit_factor),
-        "after_cost_profit": float(after_cost_profit),
-        "expectancy_usd": _optional(expectancy_usd),
-        "max_drawdown_usd": float(max_dd_usd),
-        "max_drawdown_pct": float(max_dd_pct),
-        "max_loss_streak": int(max_loss_streak),
-        "expectancy_R": _optional(expectancy_r),
-        "profit_per_active_day": _optional(profit_per_day),
-        "median_profit_per_active_day": _optional(median_day),
-        "positive_year_fraction": _optional(positive_year),
-        "positive_month_fraction": _optional(positive_month),
-        "active_months": int(active_months),
-        "worst_month": _optional(worst_month),
-        "long_PF": _optional(long_pf),
-        "short_PF": _optional(short_pf),
-        "long_trades": int(long_trades),
-        "short_trades": int(short_trades),
-        "trades_per_active_day": _optional(trades_per_day),
-        "median_hold_minutes": _optional(median_hold),
-        "top_5_trade_profit_fraction": _optional(top5_fraction),
-        "best_month_profit_fraction": _optional(best_month_fraction),
-        "net_profit": float(net_profit),
-        "commission_cost": float(commission_cost),
-        "spread_cost": float(spread_cost),
-        "slippage_cost": float(slippage_cost),
-    }
+return {
+    "completed_trades": int(completed), "wins": int(wins), "losses": int(losses),
+    "win_rate": _optional(win_rate), "gross_profit": float(gross_profit),
+    "gross_loss": float(gross_loss), "profit_factor": _optional(profit_factor),
+    "after_cost_profit": float(after_cost_profit), "expectancy_usd": _optional(expectancy_usd),
+    "max_drawdown_usd": float(max_dd_usd), "max_drawdown_pct": float(max_dd_pct),
+    "max_loss_streak": int(max_loss_streak), "expectancy_R": _optional(expectancy_r),
+    "profit_per_active_day": _optional(profit_per_day),
+    "median_profit_per_active_day": _optional(median_day),
+    "positive_year_fraction": _optional(positive_year),
+    "positive_month_fraction": _optional(positive_month), "active_months": int(active_months),
+    "worst_month": _optional(worst_month), "long_PF": _optional(long_pf),
+    "short_PF": _optional(short_pf), "long_trades": int(long_trades),
+    "short_trades": int(short_trades), "trades_per_active_day": _optional(trades_per_day),
+    "median_hold_minutes": _optional(median_hold),
+    "top_5_trade_profit_fraction": _optional(top5_fraction),
+    "best_month_profit_fraction": _optional(best_month_fraction),
+    "net_profit": float(net_profit), "commission_cost": float(commission_cost),
+    "spread_cost": float(spread_cost), "slippage_cost": float(slippage_cost),
+}
 ```
 
 - [ ] **Step 6: Write complete packed summary equivalence tests**
 
-Create `tests/metrics/test_packed_performance.py` with a helper that receives `broker_dates`, derives group IDs through `MarketBundle`, and uses the same canonical dates for the detailed oracle:
+Create `tests/metrics/test_packed_performance.py` with:
 
 ```python
 def assert_exact_summary(bars, signals, symbol, cost, risk, exit_spec, broker_dates):
@@ -706,7 +624,7 @@ def assert_exact_summary(bars, signals, symbol, cost, risk, exit_spec, broker_da
     assert actual == expected
 ```
 
-Add concrete fixtures for: no trades; only wins; only losses; mixed long/short; spread/slippage/commission; same-bar ambiguity; target/time/trail/end-of-data; multiple trades per day; day/month/year boundaries; odd/even median counts; equal P/L; risk skips; and a deterministic 20,000-bar high-trade fixture.
+Add concrete fixtures for no trades; only wins; only losses; mixed long/short; spread/slippage/commission; same-bar ambiguity; target/time/trail/end-of-data; multiple trades per day; day/month/year boundaries; odd/even median counts; equal P/L; risk skips; and a deterministic 20,000-bar high-trade fixture.
 
 - [ ] **Step 7: Run GREEN metric tests**
 
@@ -739,8 +657,6 @@ git commit -m "perf: summarize packed backtests without Trade objects"
 
 - [ ] **Step 1: Write the structural RED test**
 
-Add to `tests/runner/test_single.py`:
-
 ```python
 def test_discovery_path_never_calls_detailed_trade_materialization(monkeypatch):
     def forbidden_detailed(*args, **kwargs):
@@ -754,33 +670,23 @@ def test_discovery_path_never_calls_detailed_trade_materialization(monkeypatch):
 
 Run it before implementation and require the guard failure.
 
-- [ ] **Step 2: Implement the packed/detailed branch in `run_experiment()`**
+- [ ] **Step 2: Implement the packed/detailed branch**
 
-Keep signal generation, direction filtering, `CostModel`, `RiskModel`, and `ExitSpec` construction shared. Replace the unconditional detailed backtest with:
+Keep signal generation, direction filtering, cost/risk construction, and `ExitSpec` shared. Then:
 
 ```python
 exit_spec = _exit_spec(experiment)
 if include_trades:
-    result = run_fast_backtest(
-        market_bundle.bars, signals, market_bundle.symbol, cost, risk, exit_spec
-    )
+    result = run_fast_backtest(market_bundle.bars, signals, market_bundle.symbol, cost, risk, exit_spec)
     trades = tuple(_annotate_trade(trade, experiment, market_bundle) for trade in result.trades)
     metrics = summarize_trades(trades, starting_equity=risk.account_equity)
     risk_skip_count = result.risk_skip_count
 else:
-    packed = run_packed_backtest(
-        market_bundle.bars, signals, market_bundle.symbol, cost, risk, exit_spec
-    )
+    packed = run_packed_backtest(market_bundle.bars, signals, market_bundle.symbol, cost, risk, exit_spec)
     trades = ()
     metrics = summarize_packed_backtest(
-        packed,
-        market_bundle.bars,
-        market_bundle.symbol,
-        cost,
-        risk,
-        market_bundle.broker_day_id,
-        market_bundle.broker_month_id,
-        market_bundle.broker_year_id,
+        packed, market_bundle.bars, market_bundle.symbol, cost, risk,
+        market_bundle.broker_day_id, market_bundle.broker_month_id, market_bundle.broker_year_id,
     )
     risk_skip_count = packed.risk_skip_count
 ```
@@ -789,7 +695,7 @@ Build `master` exactly as today except use `int(risk_skip_count)`.
 
 - [ ] **Step 3: Add a calendar-sensitive complete master parity test**
 
-Retain the existing simple equality test and add a second market whose `broker_date` spans two months. Run both modes and require:
+Retain the current simple equality test and add a second market whose canonical `broker_date` spans two months. Require:
 
 ```python
 assert discovery.master_result == full.master_result
@@ -797,13 +703,13 @@ assert discovery.trades == ()
 assert len(full.trades) > 0
 ```
 
-- [ ] **Step 4: Run GREEN runner and campaign tests**
+- [ ] **Step 4: Run GREEN runner/campaign tests**
 
 ```powershell
 python -m pytest tests/runner/test_single.py tests/runner/test_campaign.py tests/runner/test_manifest.py tests/runner/test_smoke_provenance.py tests/runner/test_smoke_selection.py -v
 ```
 
-Expected: all PASS; no provenance behavior changes.
+Expected: all PASS; provenance behavior unchanged.
 
 - [ ] **Step 5: Commit Task 4**
 
@@ -843,9 +749,9 @@ python -m pytest
 
 Expected: zero failures and zero errors.
 
-- [ ] **Step 3: Handle failures through root-cause-first TDD only**
+- [ ] **Step 3: For any failure, use one RED -> one fix -> GREEN cycle**
 
-For any failure: reproduce just that test; determine whether the defect is kernel packaging, trade economics, calendar grouping, aggregate order, or runner routing; add/retain the smallest regression; make one production fix; rerun focused + full suite. Do not stack speculative fixes.
+Reproduce the single failure; identify whether it is kernel packaging, trade economics, calendar grouping, aggregation order, or runner routing; retain/add the smallest regression; make one production fix; rerun focused + full suite. Do not stack speculative fixes.
 
 ---
 
@@ -856,7 +762,7 @@ For any failure: reproduce just that test; determine whether the defect is kerne
 
 **Interfaces:**
 - CLI accepts `--catalog`, `--features`, and exactly one of `--representatives` or `--count`.
-- It loads one market bundle, selects deterministic experiments, runs packed and detailed modes, compares complete master dictionaries exactly, prints field-level differences, and exits nonzero on mismatch.
+- Loads one market bundle, selects deterministic experiments, runs packed and detailed modes, compares complete master dictionaries exactly, prints field-level differences, and exits nonzero on mismatch.
 
 - [ ] **Step 1: Implement the parity CLI**
 
@@ -897,6 +803,7 @@ def main() -> None:
         selected_ids = select_stratified_smoke_ids(args.catalog, args.count)
 
     market = load_market_bundle(args.features)
+    passed = 0
     mismatches = 0
     for index, experiment_id in enumerate(selected_ids, 1):
         experiment = by_id[experiment_id]
@@ -910,9 +817,10 @@ def main() -> None:
                 if left.get(field) != right.get(field):
                     print("MISMATCH", experiment_id, field, repr(left.get(field)), repr(right.get(field)))
             break
+        passed += 1
         print(f"PARITY_PROGRESS={index}/{len(selected_ids)} {experiment_id}")
 
-    print(f"PARITY_PASS={len(selected_ids) - mismatches}")
+    print(f"PARITY_PASS={passed}")
     print(f"PARITY_MISMATCHES={mismatches}")
     if mismatches:
         raise SystemExit(1)
@@ -1014,9 +922,9 @@ python -m scripts.run_smoke `
   --seed 9215000
 ```
 
-Required: `100` selected completed, `100` unique IDs, zero errors.
+Required: 100 selected completed, 100 unique IDs, zero errors.
 
-- [ ] **Step 4: Enforce the benchmark and provenance gate**
+- [ ] **Step 4: Enforce benchmark and provenance**
 
 ```powershell
 Get-Content "$smokeRoot\results\THROUGHPUT_BENCHMARK.json"
