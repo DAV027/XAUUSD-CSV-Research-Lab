@@ -97,7 +97,7 @@ def _context(open_, high, low, close, atr=None, flags=None) -> StrategyContext:
 
 
 def test_rejection_equal_wicks_stays_flat():
-    market = _context([10.0], [11.0], [9.0], [10.5])
+    market = _context([10.0], [11.0], [9.5], [10.5])
     assert rejection_candle(market, {"wick_body_ratio": 1.0})[-1] == 0
 
 
