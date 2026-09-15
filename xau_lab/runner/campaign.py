@@ -97,6 +97,37 @@ def _time_epoch(frame: pl.DataFrame) -> np.ndarray:
     return np.asarray(parsed["epoch"].to_numpy(), dtype=np.int64)
 
 
+def _contiguous_group_ids(*columns: np.ndarray) -> np.ndarray:
+    if not columns:
+        raise ValueError("at least one calendar column is required")
+    arrays = tuple(np.asarray(values) for values in columns)
+    n = len(arrays[0])
+    if any(len(values) != n for values in arrays):
+        raise ValueError("calendar columns must have equal length")
+    if n == 0:
+        return np.empty(0, dtype=np.int32)
+
+    changed = np.ones(n, dtype=np.bool_)
+    changed[1:] = False
+    equal_prefix = np.ones(n - 1, dtype=np.bool_)
+    descending = np.zeros(n - 1, dtype=np.bool_)
+    for values in arrays:
+        previous = values[:-1]
+        current = values[1:]
+        descending |= equal_prefix & (current < previous)
+        equal_prefix &= current == previous
+        changed[1:] |= current != previous
+    if not np.any(descending):
+        return (np.cumsum(changed, dtype=np.int64) - 1).astype(np.int32)
+
+    ids = np.empty(n, dtype=np.int32)
+    seen: dict[tuple[object, ...], int] = {}
+    for index in range(n):
+        key = tuple(values[index] for values in arrays)
+        ids[index] = seen.setdefault(key, len(seen))
+    return ids
+
+
 def load_market_bundle(feature_path: str | Path) -> MarketBundle:
     feature_path = Path(feature_path)
     frame = pl.read_parquet(feature_path)
@@ -139,12 +170,38 @@ def load_market_bundle(feature_path: str | Path) -> MarketBundle:
             .alias("broker_date")
         )["broker_date"].to_numpy()
 
+    if "year" in frame.columns and "month" in frame.columns:
+        broker_year = np.asarray(frame["year"].to_numpy(), dtype=np.int32)
+        broker_month = np.asarray(frame["month"].to_numpy(), dtype=np.int16)
+    else:
+        broker_year = np.fromiter(
+            (int(str(value)[:4]) for value in broker_date),
+            dtype=np.int32,
+            count=len(broker_date),
+        )
+        broker_month = np.fromiter(
+            (int(str(value)[5:7]) for value in broker_date),
+            dtype=np.int16,
+            count=len(broker_date),
+        )
+    broker_day_id = _contiguous_group_ids(broker_date)
+    broker_month_id = _contiguous_group_ids(broker_year, broker_month)
+    broker_year_id = _contiguous_group_ids(broker_year)
+
     base = {"time_epoch", "time", "open", "high", "low", "close", "spread", "broker_date"}
     features = {name: frame[name].to_numpy() for name in frame.columns if name not in base}
     for name in ("session_asia", "session_london", "session_new_york", "session_overlap"):
         if name in frame.columns:
             features[name] = frame[name].to_numpy()
-    return MarketBundle(bars=bars, symbol=symbol, broker_date=broker_date, features=features)
+    return MarketBundle(
+        bars=bars,
+        symbol=symbol,
+        broker_date=broker_date,
+        features=features,
+        broker_day_id=broker_day_id,
+        broker_month_id=broker_month_id,
+        broker_year_id=broker_year_id,
+    )
 
 
 def _init_worker(feature_path: str) -> None:
