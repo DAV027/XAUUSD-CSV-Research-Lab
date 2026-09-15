@@ -234,9 +234,40 @@ def test_discovery_path_does_not_annotate_trades(monkeypatch: pytest.MonkeyPatch
     assert outcome.master_result["completed_trades"] > 0
 
 
+def test_discovery_path_never_calls_detailed_trade_materialization(monkeypatch):
+    def forbidden_detailed(*args, **kwargs):
+        raise AssertionError("discovery path must not materialize Trade objects")
+
+    monkeypatch.setattr(single_module, "run_fast_backtest", forbidden_detailed)
+
+    outcome = run_experiment(_experiment(), _market(), include_trades=False)
+
+    assert outcome.ok
+    assert outcome.trades == ()
+    assert outcome.master_result is not None
+
+
 def test_discovery_master_metrics_match_full_annotation_path():
     discovery = run_experiment(_experiment(), _market(), include_trades=False)
     full = run_experiment(_experiment(), _market(), include_trades=True)
+
+    assert discovery.master_result == full.master_result
+    assert discovery.trades == ()
+    assert len(full.trades) > 0
+
+
+def test_discovery_master_metrics_match_full_path_across_calendar_months():
+    base = _market()
+    dates = np.array(["2026-01-31"] * 8 + ["2026-02-01"] * 8, dtype=object)
+    market = MarketBundle(
+        bars=base.bars,
+        symbol=base.symbol,
+        broker_date=dates,
+        features=base.features,
+    )
+
+    discovery = run_experiment(_experiment(), market, include_trades=False)
+    full = run_experiment(_experiment(), market, include_trades=True)
 
     assert discovery.master_result == full.master_result
     assert discovery.trades == ()

@@ -15,9 +15,10 @@ from xau_lab.strategies import session as _session  # noqa: F401
 from xau_lab.strategies import statistical as _statistical  # noqa: F401
 from xau_lab.strategies import trend as _trend  # noqa: F401
 from xau_lab.strategies import volatility as _volatility  # noqa: F401
-from xau_lab.backtest.fast import run_fast_backtest
+from xau_lab.backtest.fast import run_fast_backtest, run_packed_backtest
 from xau_lab.backtest.models import CostModel, ExitSpec, MarketBars, RiskModel, SymbolSpec, Trade
 from xau_lab.experiments.spec import CompleteExperiment
+from xau_lab.metrics.packed import summarize_packed_backtest
 from xau_lab.metrics.performance import summarize_trades
 from xau_lab.strategies.base import StrategyContext
 from xau_lab.strategies.registry import get_strategy
@@ -223,31 +224,46 @@ def run_experiment(
         slippage_points_per_fill=float(experiment.slippage_points_per_fill),
     )
     risk = risk_model or RiskModel()
-    result = run_fast_backtest(
-        market_bundle.bars,
-        signals,
-        market_bundle.symbol,
-        cost,
-        risk,
-        _exit_spec(experiment),
-    )
-
+    exit_spec = _exit_spec(experiment)
     if include_trades:
+        result = run_fast_backtest(
+            market_bundle.bars,
+            signals,
+            market_bundle.symbol,
+            cost,
+            risk,
+            exit_spec,
+        )
         trades = tuple(_annotate_trade(trade, experiment, market_bundle) for trade in result.trades)
         metrics = summarize_trades(trades, starting_equity=risk.account_equity)
+        risk_skip_count = result.risk_skip_count
     else:
-        trades = ()
-        metrics = summarize_trades(
-            result.trades,
-            starting_equity=risk.account_equity,
-            broker_dates=market_bundle.broker_date,
+        packed = run_packed_backtest(
+            market_bundle.bars,
+            signals,
+            market_bundle.symbol,
+            cost,
+            risk,
+            exit_spec,
         )
+        trades = ()
+        metrics = summarize_packed_backtest(
+            packed,
+            market_bundle.bars,
+            market_bundle.symbol,
+            cost,
+            risk,
+            market_bundle.broker_day_id,
+            market_bundle.broker_month_id,
+            market_bundle.broker_year_id,
+        )
+        risk_skip_count = packed.risk_skip_count
 
     master = {
         **experiment.to_dict(),
         "data_start": int(market_bundle.bars.time_epoch[0]) if len(market_bundle.bars) else None,
         "data_end": int(market_bundle.bars.time_epoch[-1]) if len(market_bundle.bars) else None,
-        "risk_skip_count": int(result.risk_skip_count),
+        "risk_skip_count": int(risk_skip_count),
         **metrics,
     }
     return ExperimentOutcome(
