@@ -4,6 +4,7 @@ import pytest
 from xau_lab.backtest.fast import run_fast_backtest, run_packed_backtest
 from xau_lab.backtest.models import CostModel, ExitSpec, MarketBars, RiskModel, SymbolSpec
 from xau_lab.backtest.packed import PackedBacktestResult
+from xau_lab.metrics.packed import _trade_economics
 
 
 SPEC = SymbolSpec(point=0.01, digits=2, contract_size=100.0, volume_min=0.01, volume_step=0.01)
@@ -99,3 +100,28 @@ def test_packed_rows_match_detailed_trade_materialization_exactly():
         assert packed.lot[index] == trade.lot_size
         assert packed.planned_risk[index] == trade.planned_risk_usd
         assert reason_by_code[int(packed.reason[index])] == trade.exit_reason
+
+
+@pytest.mark.parametrize("direction", [-1, 1])
+@pytest.mark.parametrize("exit_spec", [
+    ExitSpec(0.3, target_r=1.0), ExitSpec(1.0, target_r=0.2),
+    ExitSpec(1.0, time_exit_minutes=3), ExitSpec(1.0, atr_trail=0.1), ExitSpec(1.0),
+])
+def test_scalar_packed_economics_match_detailed_exactly(direction, exit_spec):
+    bars, signals = _market()
+    signals[::5] = direction
+    cost = CostModel(commission_round_trip_per_lot=6.137, slippage_points_per_fill=3.17)
+    packed = run_packed_backtest(bars, signals, SPEC, cost, RISK, exit_spec)
+    detailed = run_fast_backtest(bars, signals, SPEC, cost, RISK, exit_spec)
+    assert packed.trade_count == len(detailed.trades) > 0
+    for i, trade in enumerate(detailed.trades):
+        actual = _trade_economics(
+            i, packed.direction, packed.entry_index, packed.exit_index,
+            packed.raw_entry, packed.lot, packed.planned_risk, packed.raw_exit,
+            bars.spread, bars.time_epoch, SPEC.point, SPEC.contract_size,
+            cost.commission_round_trip_per_lot, cost.slippage_points_per_fill,
+        )
+        assert actual == (
+            trade.net_pnl, trade.pnl_R, trade.hold_minutes,
+            trade.commission, trade.spread_cost, trade.slippage_cost,
+        )
