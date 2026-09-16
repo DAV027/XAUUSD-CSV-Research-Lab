@@ -28,6 +28,24 @@ def _rows(*, at_least_10=205, at_least_300=26):
     return rows
 
 
+def _five_percent_rows(*, exceed=False):
+    rows = []
+    for index in range(ACTIVATION_SAMPLE_SIZE):
+        completed = 300 if index < 26 else 100
+        end_of_data = 15 if index < 26 else 5
+        if exceed and index == 0:
+            end_of_data += 1
+        rows.append(
+            {
+                "experiment_id": f"EXP{index:04d}",
+                "completed_trades": completed,
+                "risk_skip_count": 0,
+                "end_of_data_exits": end_of_data,
+            }
+        )
+    return rows
+
+
 def test_spread_sample_indices_cover_full_default_catalog_deterministically():
     first = spread_sample_indices(10_000, 256)
     second = spread_sample_indices(10_000, 256)
@@ -66,35 +84,15 @@ def test_activation_fails_with_only_25_configs_at_300_trades():
 
 
 def test_activation_accepts_exactly_five_percent_end_of_data_exits():
-    rows = []
-    for index in range(ACTIVATION_SAMPLE_SIZE):
-        rows.append(
-            {
-                "experiment_id": f"EXP{index:04d}",
-                "completed_trades": 100,
-                "risk_skip_count": 0,
-                "end_of_data_exits": 5,
-            }
-        )
-    decision = evaluate_activation(rows)
+    decision = evaluate_activation(_five_percent_rows())
     assert decision.passed is True
-    assert decision.total_completed_trades == 25_600
-    assert decision.total_end_of_data_exits == 1_280
+    assert decision.total_completed_trades == 30_800
+    assert decision.total_end_of_data_exits == 1_540
     assert decision.end_of_data_fraction == pytest.approx(0.05)
 
 
 def test_activation_rejects_any_end_of_data_fraction_above_five_percent():
-    rows = []
-    for index in range(ACTIVATION_SAMPLE_SIZE):
-        rows.append(
-            {
-                "experiment_id": f"EXP{index:04d}",
-                "completed_trades": 100,
-                "risk_skip_count": 0,
-                "end_of_data_exits": 6 if index == 0 else 5,
-            }
-        )
-    decision = evaluate_activation(rows)
+    decision = evaluate_activation(_five_percent_rows(exceed=True))
     assert decision.passed is False
     assert "end_of_data_fraction_above_5_pct" in decision.reasons
 
