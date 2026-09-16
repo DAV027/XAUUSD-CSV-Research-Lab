@@ -56,6 +56,6 @@ def test_edge_c_rejects_malformed_metrics_and_allows_zero_survivors():
     rows = [
         _row("BAD_SCORE", final_score="bad"),
         _row("BAD_PF", profit_factor=None),
-        _row("MISSING_ID", experiment_id=""),
+        _row(""),
     ]
     assert select_edge_c_candidates(rows) == []
