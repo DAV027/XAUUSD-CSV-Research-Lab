@@ -9,6 +9,8 @@ from scripts.validate_oos_freeze import validate_oos_freeze
 from xau_lab.runner.campaign import _read_catalog, load_market_bundle
 from xau_lab.validation.oos_runner import append_oos_rows, load_holdout_plan, run_oos_experiment
 
+TIMESTAMP_SEMANTICS = "broker_local_to_utc"
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -54,7 +56,10 @@ def run_oos_snapshot(
 
     catalog = _read_catalog(catalog_path)
     by_id = {item.experiment_id: item for item in catalog}
-    market = load_market_bundle(oos_feature_path)
+    market = load_market_bundle(
+        oos_feature_path,
+        timestamp_semantics=TIMESTAMP_SEMANTICS,
+    )
     start_epoch = int(plan["prospective_start_epoch"])
     end_epoch = int(plan["planned_end_exclusive_epoch"])
     snapshot_sha = _sha256(oos_feature_path)
@@ -79,6 +84,7 @@ def run_oos_snapshot(
         row = {
             "holdout_name": str(plan.get("name") or ""),
             "tier": str(candidate.get("tier") or ""),
+            "timestamp_semantics": TIMESTAMP_SEMANTICS,
             "snapshot_feature_sha256": snapshot_sha,
             **outcome.master_result,
         }
@@ -139,6 +145,7 @@ def main() -> None:
         output_root=args.output_root,
     )
     print("OOS_SNAPSHOT_VALID=true")
+    print(f"TIMESTAMP_SEMANTICS={TIMESTAMP_SEMANTICS}")
     print(f"CANDIDATES={result['candidate_count']}")
     print(f"APPENDED_ROWS={result['appended_rows']}")
     print(f"OBSERVED_THROUGH_EPOCH={result['observed_through_epoch']}")
