@@ -63,7 +63,7 @@ Parameter domain:
 - `compression_lookback`: integer 20–120
 - `compression_atr_ratio`: float 0.35–0.80
 
-When compression is found, the strategy stores the range high, range low, and direction-neutral armed state. The range remains fixed for that episode.
+When compression is found, the strategy stores the range high, range low, and `atr_ref` in a direction-neutral armed state. The range and `atr_ref` remain fixed for the entire episode so breakout, retest, invalidation, and confirmation thresholds cannot drift as later bars change volatility.
 
 ### State 2: Require decisive breakout
 
@@ -86,11 +86,11 @@ Parameter domains:
 - `breakout_buffer_atr`: float 0.25–1.50
 - `breakout_body_atr`: float 0.25–1.50
 
-After a valid breakout, the episode enters retest state and stores the broken level (`range_high` for long, `range_low` for short), the breakout direction, and the breakout bar index.
+After a valid breakout, the episode enters retest state and stores the broken level (`range_high` for long, `range_low` for short), the breakout direction, the fixed episode `atr_ref`, and the breakout bar index.
 
 ### State 3: Retest / hold
 
-A breakout has a finite retest window of `retest_window` bars after the breakout bar.
+A breakout has a finite retest window of `retest_window` bars after the breakout bar. The first eligible retest bar is `breakout_index + 1`; the final eligible retest bar is `breakout_index + retest_window`.
 
 Parameter domain:
 
@@ -116,7 +116,7 @@ A retest is considered observed when price reaches or crosses the broken level i
 
 The strategy does not emit a signal merely because a retest occurred.
 
-If no retest occurs within `retest_window`, the episode expires with no signal.
+If no retest occurs by the end of `breakout_index + retest_window`, the episode expires with no signal.
 
 ### State 4: Confirmation and single entry
 
@@ -131,24 +131,40 @@ Parameter domain:
 
 The confirmation bar must close in the breakout direction relative to its open.
 
+A retest and confirmation may occur on the same M1 bar if that bar touches the retest zone intrabar, never closes through the invalidation boundary, and then closes beyond the confirmation threshold in the breakout direction. This is causal because the signal is emitted only at that bar's close.
+
 On the first confirming bar, emit exactly one signal (`+1` long, `-1` short), then permanently lock that episode.
 
 No second signal is allowed from the same stored compression range, even if price retests again.
 
 ### State 5: Rearm
 
-After signal, invalidation, or expiry, a new episode may arm only after the market first leaves the old compression state and later forms a fresh qualifying compression window. Consecutive overlapping windows from the same quiet regime must not produce repeated armed episodes.
+After signal, invalidation, or expiry, the strategy enters a locked/rearm-required state. A new episode may arm only after the rolling compression predicate first becomes false on at least one later bar and subsequently becomes true again on a later bar. Consecutive overlapping windows from the same quiet regime therefore cannot produce repeated armed episodes.
 
-Implementation must therefore track whether the strategy has observed a non-compressed bar since the prior episode ended. This explicit rearm rule is part of the hypothesis and is not a tunable parameter.
+The rolling compression predicate used for rearming is the same State-1 definition applied causally to the current candidate window and its lagged ATR reference. This explicit rearm rule is part of the hypothesis and is not a tunable parameter.
 
 ## Causality and data integrity
 
 - No future bar may contribute to a current signal.
 - Compression range uses bars strictly before the breakout candidate bar.
-- ATR references use only current-or-prior already-known features according to the repository's causal feature contract; the default design uses `atr14[i-1]` for episode thresholds so the current breakout bar cannot inflate its own threshold.
+- The episode `atr_ref` is `atr14[i-1]` at the bar where that compression episode arms and remains fixed for the episode.
 - Invalid/NaN price or ATR inputs cannot arm, advance, confirm, or signal an episode.
 - Existing centralized `entry_allowed` / data-integrity masking remains authoritative.
 - Direction mode is `combined` for Edge C v1; long-only/short-only variants are not separately sampled in v1.
+
+## Frozen strategy parameter domain
+
+Edge C v1 samples exactly seven strategy parameters:
+
+- `compression_lookback`: integer 20–120
+- `compression_atr_ratio`: float 0.35–0.80
+- `breakout_buffer_atr`: float 0.25–1.50
+- `breakout_body_atr`: float 0.25–1.50
+- `retest_window`: integer 2–20
+- `retest_tolerance_atr`: float 0.10–0.75
+- `confirmation_atr`: float 0.10–1.00
+
+No RSI, MACD, ADX, session filter, news filter, or additional confirmation parameter is part of Edge C v1.
 
 ## Exit search space
 
@@ -181,7 +197,7 @@ Each catalog row must have:
 - sampler version `edge_c_v1`
 - direction `combined`
 - seed lineage from default seed 9,216,200
-- one parameter set sampled from the frozen six-dimensional strategy domain
+- one parameter set sampled from the frozen seven-dimensional strategy domain
 - one exit specification sampled from the frozen Edge C exit domain
 - unchanged repository cost model
 
@@ -248,20 +264,22 @@ If no candidate survives, Edge C v1 is rejected and preserved unchanged as a his
 Implementation is test-driven. Tests must cover at least:
 
 1. compression uses only prior bars;
-2. wick-only breakout does not qualify;
-3. decisive long and short breakouts enter retest state;
-4. close back inside tolerance invalidates the episode;
-5. no retest before timeout produces no signal;
-6. valid retest plus confirmation emits exactly one signal;
-7. repeated retests from the same episode never emit a second signal;
-8. rearm requires leaving the old compression regime before a fresh compression can arm;
-9. NaN/invalid ATR or price data blocks progression safely;
-10. strategy registration exposes exactly the frozen parameter domain;
-11. Edge C catalog is deterministic and unique;
-12. original sampler-v1 never samples the Edge C family;
-13. campaign CLI defaults are isolated under `edge_c/results/` and use 2 workers;
-14. robustness/economic selector does not impose a trade-frequency cap;
-15. zero qualifying candidates remains a valid outcome and does not relax thresholds.
+2. episode ATR is lagged and fixed after arming;
+3. wick-only breakout does not qualify;
+4. decisive long and short breakouts enter retest state;
+5. close back inside tolerance invalidates the episode;
+6. no retest before timeout produces no signal;
+7. valid retest plus later confirmation emits exactly one signal;
+8. same-bar retest plus confirmation emits exactly one signal when all hold conditions are satisfied;
+9. repeated retests from the same episode never emit a second signal;
+10. rearm requires a false rolling-compression predicate before a fresh true predicate can arm;
+11. NaN/invalid ATR or price data blocks progression safely;
+12. strategy registration exposes exactly the frozen seven-parameter domain;
+13. Edge C catalog is deterministic and unique;
+14. original sampler-v1 never samples the Edge C family;
+15. campaign CLI defaults are isolated under `edge_c/results/` and use 2 workers;
+16. robustness/economic selector does not impose a trade-frequency cap;
+17. zero qualifying candidates remains a valid outcome and does not relax thresholds.
 
 ## Success and failure interpretation
 
