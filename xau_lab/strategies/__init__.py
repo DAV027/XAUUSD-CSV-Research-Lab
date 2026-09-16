@@ -4,6 +4,7 @@ from xau_lab.strategies.registry import get_strategy, list_strategies, register_
 # Keep research-only strategy families registered whenever the package is imported.
 # The original v1 sampler still filters strictly to its frozen approved families.
 from xau_lab.strategies import edge_b as _edge_b  # noqa: F401,E402
+from xau_lab.strategies import edge_b_v2 as _edge_b_v2  # noqa: F401,E402
 
 __all__ = [
     "StrategyContext",
