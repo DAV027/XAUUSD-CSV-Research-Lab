@@ -163,6 +163,7 @@ def test_diagnostic_snapshot_is_separate_labeled_and_idempotent(tmp_path: Path):
     assert row["is_pristine_prospective_oos"] == "False"
     assert row["diagnostic_start_epoch"] == str(DIAG_START)
     assert row["diagnostic_end_exclusive_epoch"] == str(DIAG_END)
+    assert row["timestamp_semantics"] == "broker_local_to_utc"
     assert "oos_start_epoch" not in row
     assert row["snapshot_feature_sha256"] == _sha256(p["feature"])
 

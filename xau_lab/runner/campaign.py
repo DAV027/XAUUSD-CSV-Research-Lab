@@ -19,6 +19,7 @@ from xau_lab.io.results import ResultStore
 from xau_lab.runner.single import ExperimentOutcome, MarketBundle, run_experiment
 
 _WORKER_MARKET: MarketBundle | None = None
+_TIMESTAMP_SEMANTICS = {"legacy_wall_clock", "broker_local_to_utc"}
 
 
 def _optional_number(value: str | None, cast):
@@ -88,12 +89,34 @@ def _column(frame: pl.DataFrame, *names: str) -> np.ndarray:
     raise ValueError(f"feature dataset is missing required column; expected one of {names}")
 
 
-def _time_epoch(frame: pl.DataFrame) -> np.ndarray:
+def _time_epoch(
+    frame: pl.DataFrame,
+    *,
+    broker_timezone: str,
+    timestamp_semantics: str,
+) -> np.ndarray:
+    if timestamp_semantics not in _TIMESTAMP_SEMANTICS:
+        raise ValueError(
+            f"unsupported timestamp_semantics {timestamp_semantics!r}; "
+            f"expected one of {sorted(_TIMESTAMP_SEMANTICS)}"
+        )
     if "time_epoch" in frame.columns:
         return np.asarray(frame["time_epoch"].to_numpy(), dtype=np.int64)
     if "time" not in frame.columns:
         raise ValueError("feature dataset requires time_epoch or time")
-    parsed = frame.select(pl.col("time").str.to_datetime(strict=True).dt.epoch("s").alias("epoch"))
+
+    parsed_time = pl.col("time").cast(pl.String).str.to_datetime(strict=True)
+    if timestamp_semantics == "broker_local_to_utc":
+        parsed_time = (
+            parsed_time
+            .dt.replace_time_zone(
+                broker_timezone,
+                ambiguous="raise",
+                non_existent="raise",
+            )
+            .dt.convert_time_zone("UTC")
+        )
+    parsed = frame.select(parsed_time.dt.epoch("s").alias("epoch"))
     return np.asarray(parsed["epoch"].to_numpy(), dtype=np.int64)
 
 
@@ -128,7 +151,11 @@ def _contiguous_group_ids(*columns: np.ndarray) -> np.ndarray:
     return ids
 
 
-def load_market_bundle(feature_path: str | Path) -> MarketBundle:
+def load_market_bundle(
+    feature_path: str | Path,
+    *,
+    timestamp_semantics: str = "legacy_wall_clock",
+) -> MarketBundle:
     feature_path = Path(feature_path)
     frame = pl.read_parquet(feature_path)
     metadata = _load_metadata(feature_path)
@@ -149,7 +176,11 @@ def load_market_bundle(feature_path: str | Path) -> MarketBundle:
         volume_max=float(metadata.get("volume_max", 100.0)),
     )
     bars = MarketBars(
-        time_epoch=_time_epoch(frame),
+        time_epoch=_time_epoch(
+            frame,
+            broker_timezone=str(timezone),
+            timestamp_semantics=timestamp_semantics,
+        ),
         open=_column(frame, "open"),
         high=_column(frame, "high"),
         low=_column(frame, "low"),
