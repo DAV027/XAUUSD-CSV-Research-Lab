@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "xauusd_prospective_holdout_v1",
+  "status": "frozen",
+  "shortlist_config": "config/oos_shortlist_v1.json",
+  "freeze_timestamp": "2026-09-16T06:46:32Z",
+  "selection_data_end_epoch": 1789178340,
+  "prospective_start_utc": "2026-09-17T00:00:00Z",
+  "prospective_start_epoch": 1789603200,
+  "planned_months": 3,
+  "planned_end_exclusive_utc": "2026-12-17T00:00:00Z",
+  "planned_end_exclusive_epoch": 1797465600
+}
