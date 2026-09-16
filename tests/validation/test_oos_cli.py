@@ -163,6 +163,7 @@ def test_run_oos_snapshot_writes_only_frozen_candidate_and_is_idempotent(tmp_pat
     assert rows[0]["tier"] == "primary"
     assert rows[0]["holdout_name"] == "test_holdout"
     assert rows[0]["oos_start_epoch"] == str(START_EPOCH)
+    assert rows[0]["timestamp_semantics"] == "broker_local_to_utc"
     assert rows[0]["snapshot_feature_sha256"] == _sha256(paths["oos_feature"])
 
 
