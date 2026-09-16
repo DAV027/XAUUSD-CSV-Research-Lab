@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from math import floor
 
 import numpy as np
@@ -72,7 +73,7 @@ def generate_edge_b_catalog(
             "pullback_lookback": _sample_int(3, 20, unit[2]),
             "pullback_threshold_atr": _sample_float(0.25, 1.5, unit[3]),
         }
-        params = __import__("json").loads(canonical_json(params))
+        params = json.loads(canonical_json(params))
         stop_atr = float(STOP_ATR_VALUES[int(rng.integers(0, len(STOP_ATR_VALUES)))])
         exit_type, target_r, time_exit, atr_trail = _sample_exit(rng)
         strategy_seed = _strategy_seed(seed, index)
