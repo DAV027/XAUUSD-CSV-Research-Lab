@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "post_selection_diagnostic_2026_09_13_16",
+  "status": "frozen",
+  "classification": "post_selection_pre_freeze_diagnostic",
+  "shortlist_config": "config/oos_shortlist_v1.json",
+  "selection_data_end_epoch": 1789178340,
+  "diagnostic_start_utc": "2026-09-13T00:00:00Z",
+  "diagnostic_start_epoch": 1789257600,
+  "diagnostic_end_exclusive_utc": "2026-09-17T00:00:00Z",
+  "diagnostic_end_exclusive_epoch": 1789603200,
+  "is_pristine_prospective_oos": false
+}
