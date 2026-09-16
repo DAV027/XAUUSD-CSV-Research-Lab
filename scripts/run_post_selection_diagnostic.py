@@ -5,12 +5,14 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from scripts.validate_oos_freeze import validate_oos_freeze
 from xau_lab.runner.campaign import _read_catalog, load_market_bundle
 from xau_lab.validation.oos_runner import append_oos_rows, load_holdout_plan, run_oos_experiment
 
 EXPECTED_CLASSIFICATION = "post_selection_pre_freeze_diagnostic"
+TIMESTAMP_SEMANTICS = "broker_local_to_utc"
 
 
 def _sha256(path: Path) -> str:
@@ -34,6 +36,16 @@ def _parse_utc(value: object, name: str) -> int:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError(f"{name} must be a timezone-aware ISO-8601 timestamp")
     return int(parsed.astimezone(timezone.utc).timestamp())
+
+
+def _legacy_wall_epoch_to_utc(epoch: int, broker_timezone: str) -> int:
+    try:
+        zone = ZoneInfo(broker_timezone)
+    except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
+        raise ValueError(f"invalid broker timezone: {broker_timezone!r}") from exc
+    wall_clock = datetime.fromtimestamp(int(epoch), timezone.utc).replace(tzinfo=None)
+    broker_local = wall_clock.replace(tzinfo=zone)
+    return int(broker_local.astimezone(timezone.utc).timestamp())
 
 
 def _load_diagnostic_plan(path: Path, *, true_oos_start_epoch: int) -> dict[str, object]:
@@ -116,9 +128,18 @@ def run_diagnostic_snapshot(
 
     catalog = _read_catalog(catalog_path)
     by_id = {item.experiment_id: item for item in catalog}
-    market = load_market_bundle(diagnostic_feature_path)
+    market = load_market_bundle(
+        diagnostic_feature_path,
+        timestamp_semantics=TIMESTAMP_SEMANTICS,
+    )
+    broker_timezone = market.bars.broker_timezone
     start_epoch = int(diag["diagnostic_start_epoch"])
     end_epoch = int(diag["diagnostic_end_exclusive_epoch"])
+    if diag.get("timestamp_semantics") != TIMESTAMP_SEMANTICS:
+        start_epoch = _legacy_wall_epoch_to_utc(start_epoch, broker_timezone)
+        end_epoch = _legacy_wall_epoch_to_utc(end_epoch, broker_timezone)
+    if end_epoch > int(oos_plan["prospective_start_epoch"]):
+        raise ValueError("diagnostic window must not overlap the prospective OOS window")
     snapshot_sha = _sha256(diagnostic_feature_path)
 
     rows: list[dict[str, object]] = []
@@ -146,6 +167,7 @@ def run_diagnostic_snapshot(
             "diagnostic_name": str(diag.get("name") or ""),
             "is_pristine_prospective_oos": False,
             "tier": str(candidate.get("tier") or ""),
+            "timestamp_semantics": TIMESTAMP_SEMANTICS,
             "snapshot_feature_sha256": snapshot_sha,
             "diagnostic_start_epoch": start_epoch,
             "diagnostic_end_exclusive_epoch": end_epoch,
@@ -185,7 +207,7 @@ def main() -> None:
         type=Path,
         default=Path("diagnostic_snapshot/data/features/XAUUSD_M1_FEATURES.parquet"),
     )
-    parser.add_argument("--output-root", type=Path, default=Path("diagnostic_results"))
+    parser.add_argument("--output-root", type=Path, default=Path("diagnostic_results_utc"))
     args = parser.parse_args()
 
     result = run_diagnostic_snapshot(
@@ -198,6 +220,7 @@ def main() -> None:
         output_root=args.output_root,
     )
     print("POST_SELECTION_DIAGNOSTIC_VALID=true")
+    print(f"TIMESTAMP_SEMANTICS={TIMESTAMP_SEMANTICS}")
     print(f"CANDIDATES={result['candidate_count']}")
     print(f"APPENDED_ROWS={result['appended_rows']}")
     print(f"OBSERVED_THROUGH_EPOCH={result['observed_through_epoch']}")
