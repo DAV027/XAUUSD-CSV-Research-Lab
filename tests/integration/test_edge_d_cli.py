@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import scripts.create_edge_d_catalog as create_cli
+import scripts.run_edge_d_activation as activation_cli
 
 
 def test_edge_d_catalog_cli_defaults_are_isolated():
@@ -35,3 +36,11 @@ def test_write_edge_d_catalog_uses_edge_d_generator(monkeypatch, tmp_path):
     assert output.exists()
     assert not output.with_name(output.name + ".tmp").exists()
     assert "edge_d_session_sweep_reclaim" in output.read_text(encoding="utf-8")
+
+
+def test_edge_d_activation_cli_defaults_are_isolated():
+    args = activation_cli.build_parser().parse_args([])
+
+    assert args.catalog == Path("edge_d/results/EXPERIMENT_CATALOG.csv")
+    assert args.features == Path("data/features/XAUUSD_M1_FEATURES.parquet")
+    assert args.output == Path("edge_d/results/ACTIVATION_REPORT.json")
