@@ -225,7 +225,7 @@ def test_invalid_or_missing_lagged_atr_produces_no_signal() -> None:
 
 
 def test_registry_identity_and_domain_are_frozen() -> None:
-    definition = get_strategy("edge_d_session_sweep_reclaim", "prior_session_sweep_reclaim")
+    definition = get_strategy("prior_session_sweep_reclaim")
     assert definition.family == "edge_d_session_sweep_reclaim"
     assert definition.name == "prior_session_sweep_reclaim"
     assert dict(definition.parameter_domain) == {
