@@ -250,3 +250,8 @@ def test_lifecycle_parity_script_is_syntax_valid():
 def test_tick_export_script_is_syntax_valid():
     path = Path("scripts/export_mt5_ticks.py")
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_tick_exit_parity_script_is_syntax_valid():
+    path = Path("scripts/compare_sma_rsi_tick_exits_mt5.py")
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
