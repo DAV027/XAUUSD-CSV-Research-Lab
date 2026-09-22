@@ -47,6 +47,12 @@ def main() -> None:
     )
     parser.add_argument("--from-utc")
     parser.add_argument("--to-exclusive-utc")
+    parser.add_argument(
+        "--timestamp-semantics",
+        choices=("broker_local_to_utc", "legacy_wall_clock"),
+        default="broker_local_to_utc",
+        help="Use true UTC conversion for broker-local source timestamps by default.",
+    )
     args = parser.parse_args()
 
     start_epoch = _parse_utc(args.from_utc)
@@ -54,7 +60,10 @@ def main() -> None:
     if start_epoch is not None and end_epoch is not None and start_epoch >= end_epoch:
         raise ValueError("--from-utc must be earlier than --to-exclusive-utc")
 
-    market = load_market_bundle(args.features)
+    market = load_market_bundle(
+        args.features,
+        timestamp_semantics=args.timestamp_semantics,
+    )
     ctx = market.strategy_context()
     state = build_sma_rsi_htf_state(ctx)
 
@@ -81,6 +90,7 @@ def main() -> None:
         "m15_close_utc",
         "m15_close",
         "m15_sma200",
+        "timestamp_semantics",
     ]
 
     rows: list[dict[str, object]] = []
@@ -127,6 +137,7 @@ def main() -> None:
                 "m15_close_utc": _iso_utc(int(state.m15_close_time[htf_index])),
                 "m15_close": float(state.m15_close[htf_index]),
                 "m15_sma200": float(state.m15_sma200[htf_index]),
+                "timestamp_semantics": args.timestamp_semantics,
             }
         )
 
@@ -142,6 +153,7 @@ def main() -> None:
     sells = sum(row["direction"] == "SELL" for row in rows)
     print(f"wrote {len(rows)} frozen V2.1 signals -> {args.output}")
     print(f"BUY={buys} SELL={sells}")
+    print(f"TIMESTAMP_SEMANTICS={args.timestamp_semantics}")
     print("No P/L was calculated; this export is for signal/indicator parity only.")
 
 
