@@ -48,6 +48,14 @@ def main() -> None:
     parser.add_argument("--from-utc")
     parser.add_argument("--to-exclusive-utc")
     parser.add_argument(
+        "--from-broker-date",
+        help="Inclusive broker/server calendar date YYYY-MM-DD for entry filtering.",
+    )
+    parser.add_argument(
+        "--to-exclusive-broker-date",
+        help="Exclusive broker/server calendar date YYYY-MM-DD for entry filtering.",
+    )
+    parser.add_argument(
         "--timestamp-semantics",
         choices=("broker_local_to_utc", "legacy_wall_clock"),
         default="broker_local_to_utc",
@@ -59,6 +67,21 @@ def main() -> None:
     end_epoch = _parse_utc(args.to_exclusive_utc)
     if start_epoch is not None and end_epoch is not None and start_epoch >= end_epoch:
         raise ValueError("--from-utc must be earlier than --to-exclusive-utc")
+
+    from_broker_date = args.from_broker_date
+    to_broker_date = args.to_exclusive_broker_date
+    if from_broker_date is not None:
+        datetime.fromisoformat(from_broker_date)
+    if to_broker_date is not None:
+        datetime.fromisoformat(to_broker_date)
+    if (
+        from_broker_date is not None
+        and to_broker_date is not None
+        and from_broker_date >= to_broker_date
+    ):
+        raise ValueError(
+            "--from-broker-date must be earlier than --to-exclusive-broker-date"
+        )
 
     market = load_market_bundle(
         args.features,
@@ -79,6 +102,7 @@ def main() -> None:
         "signal_m1_utc",
         "entry_epoch",
         "entry_utc",
+        "broker_date",
         "m5_close_epoch",
         "m5_close_utc",
         "m5_close",
@@ -106,6 +130,12 @@ def main() -> None:
         if end_epoch is not None and entry_epoch >= end_epoch:
             continue
 
+        broker_date = str(market.broker_date[entry_index])
+        if from_broker_date is not None and broker_date < from_broker_date:
+            continue
+        if to_broker_date is not None and broker_date >= to_broker_date:
+            continue
+
         m5_index = m5_by_source.get(signal_index)
         if m5_index is None:
             raise RuntimeError(f"signal row {signal_index} is not mapped to a completed M5 bar")
@@ -126,6 +156,7 @@ def main() -> None:
                 "signal_m1_utc": _iso_utc(signal_epoch),
                 "entry_epoch": entry_epoch,
                 "entry_utc": _iso_utc(entry_epoch),
+                "broker_date": broker_date,
                 "m5_close_epoch": m5_close_epoch,
                 "m5_close_utc": _iso_utc(m5_close_epoch),
                 "m5_close": float(state.m5_close[m5_index]),
