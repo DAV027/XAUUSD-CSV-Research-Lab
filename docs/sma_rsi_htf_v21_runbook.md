@@ -102,9 +102,16 @@ Required outputs:
 - selected M15 close
 - selected M15 SMA200
 
+Parity interpretation:
+
+- Every executed MT5 entry must have a matching Python signal at the corresponding new-M5 entry time and direction.
+- Extra Python raw signals are not automatically mismatches because the frozen MT5 EA returns early while one of its positions is already open.
+- Classify an extra Python signal as a true mismatch only when MT5 was flat and otherwise eligible to evaluate/enter at that time.
+- Also account for spread rejection or other documented execution guards before calling a signal mismatch.
+
 Target:
 
-- Explain every mismatch.
+- Explain every genuine mismatch.
 - Do not change strategy parameters to reduce mismatches.
 
 ### Stage 2 — execution-geometry parity
