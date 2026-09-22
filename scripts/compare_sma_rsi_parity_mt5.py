@@ -154,7 +154,7 @@ _GUARD_PATTERNS = (
     ("SKIPPED_RISK_CALC", "OrderCalcProfit failed"),
     ("SKIPPED_ORDER_FAILED", "Order failed |"),
 )
-_SIM_TIME_RE = re.compile(r"(20\\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}:\\d{2})")
+_SIM_TIME_RE = re.compile(r"(20\d{2}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})")
 
 
 def _read_log_lines(path: Path) -> list[str]:
@@ -164,7 +164,7 @@ def _read_log_lines(path: Path) -> list[str]:
             text = raw.decode(encoding)
         except UnicodeDecodeError:
             continue
-        if "\\x00" not in text[:1000]:
+        if "\x00" not in text[:1000]:
             return text.splitlines()
     return raw.decode("utf-8", errors="replace").splitlines()
 
