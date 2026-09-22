@@ -8,6 +8,7 @@ from xau_lab.strategies import edge_b_v2 as _edge_b_v2  # noqa: F401,E402
 from xau_lab.strategies import edge_c as _edge_c  # noqa: F401,E402
 from xau_lab.strategies import edge_c_v2 as _edge_c_v2  # noqa: F401,E402
 from xau_lab.strategies import edge_d as _edge_d  # noqa: F401,E402
+from xau_lab.strategies import sma_rsi_htf as _sma_rsi_htf  # noqa: F401,E402
 
 __all__ = [
     "StrategyContext",
