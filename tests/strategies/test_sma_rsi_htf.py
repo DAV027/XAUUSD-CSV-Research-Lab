@@ -6,6 +6,7 @@ import pytest
 from xau_lab.strategies.base import StrategyContext
 from xau_lab.strategies.registry import get_strategy
 from xau_lab.strategies.sma_rsi_htf import (
+    _mt5_iatr,
     build_sma_rsi_htf_state,
     sma_rsi_htf_v21,
 )
@@ -212,3 +213,25 @@ def test_mt5_guard_timestamp_regex_matches_tester_lines():
 def test_trade_construction_parity_script_is_syntax_valid():
     path = Path("scripts/compare_sma_rsi_trade_construction_mt5.py")
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_mt5_iatr_matches_rolling_true_range_average():
+    high = np.array([10, 12, 13, 15, 14, 16], dtype=float)
+    low = np.array([9, 10, 11, 12, 12, 13], dtype=float)
+    close = np.array([9.5, 11, 12, 14, 13, 15], dtype=float)
+
+    atr = _mt5_iatr(high, low, close, 3)
+
+    tr = np.array([
+        0.0,
+        max(12.0, 9.5) - min(10.0, 9.5),
+        max(13.0, 11.0) - min(11.0, 11.0),
+        max(15.0, 12.0) - min(12.0, 12.0),
+        max(14.0, 14.0) - min(12.0, 14.0),
+        max(16.0, 13.0) - min(13.0, 13.0),
+    ])
+
+    assert np.isnan(atr[:3]).all()
+    assert atr[3] == pytest.approx(np.mean(tr[1:4]))
+    assert atr[4] == pytest.approx(np.mean(tr[2:5]))
+    assert atr[5] == pytest.approx(np.mean(tr[3:6]))
