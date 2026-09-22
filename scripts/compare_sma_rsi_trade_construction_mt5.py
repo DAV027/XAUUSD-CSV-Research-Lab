@@ -21,6 +21,8 @@ _EXACT_RE = re.compile(
 
 ATR_MULTIPLIER = 1.5
 PRICE_DIGITS = 2
+PRICE_POINT = 0.01
+LEVEL_SPAN_TOLERANCE = PRICE_POINT + 1e-9
 
 
 def _parse_mt5_time(value: str) -> datetime:
@@ -178,10 +180,13 @@ def main() -> None:
                     "python_atr_rounded": "",
                     "atr_match": False,
                     "entry_reference": "",
-                    "expected_sl": "",
-                    "expected_tp": "",
-                    "sl_match": False,
-                    "tp_match": False,
+                    "execution_quote_after_delay": "",
+                    "execution_quote_drift": "",
+                    "logged_level_span": "",
+                    "expected_level_span": "",
+                    "level_span_error": "",
+                    "implied_atr_from_levels": "",
+                    "level_distance_match": False,
                 }
             )
             rows.append(out)
@@ -199,31 +204,38 @@ def main() -> None:
             out.update(
                 {
                     "entry_reference": "",
-                    "expected_sl": "",
-                    "expected_tp": "",
-                    "sl_match": False,
-                    "tp_match": False,
+                    "execution_quote_after_delay": "",
+                    "execution_quote_drift": "",
+                    "logged_level_span": "",
+                    "expected_level_span": "",
+                    "level_span_error": "",
+                    "implied_atr_from_levels": "",
+                    "level_distance_match": False,
                 }
             )
             rows.append(out)
             continue
 
-        entry = quote["ask"] if trade["direction"] == "BUY" else quote["bid"]
-        distance = python_atr * ATR_MULTIPLIER
-        if trade["direction"] == "BUY":
-            expected_sl = _round_digits(entry - distance)
-            expected_tp = _round_digits(entry + distance)
-        else:
-            expected_sl = _round_digits(entry + distance)
-            expected_tp = _round_digits(entry - distance)
+        execution_quote = quote["ask"] if trade["direction"] == "BUY" else quote["bid"]
+        logged_span = abs(trade["logged_tp"] - trade["logged_sl"])
+        expected_span = 2.0 * ATR_MULTIPLIER * python_atr
+        span_error = logged_span - expected_span
+        level_distance_match = abs(span_error) <= LEVEL_SPAN_TOLERANCE
 
-        out["entry_reference"] = entry
+        reconstructed_entry = (trade["logged_sl"] + trade["logged_tp"]) / 2.0
+        implied_atr = logged_span / (2.0 * ATR_MULTIPLIER)
+        quote_drift = execution_quote - reconstructed_entry
+
+        out["entry_reference"] = reconstructed_entry
+        out["execution_quote_after_delay"] = execution_quote
+        out["execution_quote_drift"] = quote_drift
         out["bid"] = quote["bid"]
         out["ask"] = quote["ask"]
-        out["expected_sl"] = expected_sl
-        out["expected_tp"] = expected_tp
-        out["sl_match"] = expected_sl == trade["logged_sl"]
-        out["tp_match"] = expected_tp == trade["logged_tp"]
+        out["logged_level_span"] = logged_span
+        out["expected_level_span"] = expected_span
+        out["level_span_error"] = span_error
+        out["implied_atr_from_levels"] = implied_atr
+        out["level_distance_match"] = level_distance_match
         out["market_log_sl_match"] = quote["market_sl"] == trade["logged_sl"]
         out["market_log_tp_match"] = quote["market_tp"] == trade["logged_tp"]
         rows.append(out)
@@ -232,44 +244,43 @@ def main() -> None:
     python_missing = sum(not bool(row["python_signal_found"]) for row in rows)
     quote_missing = sum(not bool(row["quote_found"]) for row in rows)
     atr_mismatch = sum(not bool(row["atr_match"]) for row in rows)
-    sl_mismatch = sum(not bool(row["sl_match"]) for row in rows)
-    tp_mismatch = sum(not bool(row["tp_match"]) for row in rows)
+    level_distance_mismatch = sum(not bool(row["level_distance_match"]) for row in rows)
 
     summary = {
         "mt5_executed_trade_constructions": executed,
         "python_signal_missing": python_missing,
         "mt5_quote_missing": quote_missing,
-        "atr_mismatches": atr_mismatch,
-        "sl_mismatches_without_stop_distance_adjustment": sl_mismatch,
-        "tp_mismatches_without_stop_distance_adjustment": tp_mismatch,
+        "atr_display_rounding_mismatches": atr_mismatch,
+        "level_distance_mismatches": level_distance_mismatch,
         "construction_parity_pass": (
             executed > 0
             and python_missing == 0
             and quote_missing == 0
-            and atr_mismatch == 0
-            and sl_mismatch == 0
-            and tp_mismatch == 0
+            and level_distance_mismatch == 0
         ),
         "scope": (
-            "Validates M5 ATR14 and 1.5x ATR SL/TP construction against MT5 bid/ask quotes. "
-            "Volume is reported but not independently validated here because V2.1 sizes from current equity "
-            "through MT5 OrderCalcProfit. Exit/P&L parity is not claimed."
+            "Validates M5 ATR14 through the SL/TP span generated before OrderSend. "
+            "The tester market-order line is a post-delay execution quote and is not the tick V2.1 used "
+            "to construct SL/TP. The pre-send entry reference is reconstructed from the midpoint of logged "
+            "SL and TP; their span must equal 2 * 1.5 * Python ATR within one price point of endpoint rounding. "
+            "Displayed ATR is only a 2-decimal diagnostic. Volume and exit/P&L parity are not claimed here."
         ),
         "mismatch_examples": [
             {
                 "mt5_time": row["mt5_time"],
                 "direction": row["direction"],
-                "atr_match": row["atr_match"],
-                "sl_match": row["sl_match"],
-                "tp_match": row["tp_match"],
+                "atr_display_match": row["atr_match"],
+                "python_atr": row.get("python_atr", ""),
+                "implied_atr_from_levels": row.get("implied_atr_from_levels", ""),
+                "level_span_error": row.get("level_span_error", ""),
+                "execution_quote_drift": row.get("execution_quote_drift", ""),
+                "level_distance_match": row.get("level_distance_match", False),
             }
             for row in rows
             if not (
                 bool(row["python_signal_found"])
                 and bool(row["quote_found"])
-                and bool(row["atr_match"])
-                and bool(row["sl_match"])
-                and bool(row["tp_match"])
+                and bool(row.get("level_distance_match", False))
             )
         ][:20],
     }
