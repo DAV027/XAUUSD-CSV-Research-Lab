@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "name": "sma_rsi_htf_v21_reproduction",
+  "status": "frozen_reproduction",
+  "strategy_name": "sma_rsi_htf_v21",
+  "mt5_source_sha256": "7650ecabe60c1a5fbe9735cf9fb9977877865ae2694eb9f2c329c1a2ae6a4313",
+  "mt5_ex5_sha256": "cf57eec574a1658dba36e3dd01a9fe6e188f53c504d11f7723aabfeb879e7548",
+  "signal_timeframe": "M5",
+  "fast_sma": 9,
+  "slow_sma": 21,
+  "rsi_period": 14,
+  "rsi_overbought": 70.0,
+  "rsi_oversold": 30.0,
+  "atr_period": 14,
+  "atr_multiplier": 1.5,
+  "htf_timeframe": "M15",
+  "htf_sma": 200,
+  "target_r": 1.0,
+  "risk_percent_equity": 0.2,
+  "development_period": {
+    "from": "2026-06-01",
+    "to_exclusive": "2026-08-31"
+  },
+  "development_reference": {
+    "net_profit_usd": 80.25,
+    "profit_factor": 1.06,
+    "expected_payoff_usd": 0.22,
+    "trades": 364,
+    "win_rate_pct": 50.82,
+    "max_equity_drawdown_pct": 2.99,
+    "classification": "INVESTIGATE_FURTHER"
+  },
+  "prospective_validation": {
+    "from": "2026-10-01",
+    "to_exclusive": "2027-01-01",
+    "status": "reserved_not_run"
+  },
+  "final_oos": {
+    "from": "2027-01-01",
+    "to_exclusive": "2027-04-01",
+    "status": "reserved_untouched",
+    "instruction": "Do not inspect returns or use this period for development."
+  },
+  "research_rule": "Reproduce signal timing first. No parameter optimization until MT5/Python signal parity is established."
+}
