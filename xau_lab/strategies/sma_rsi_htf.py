@@ -156,7 +156,7 @@ def build_sma_rsi_htf_state(ctx: StrategyContext) -> SmaRsiHtfState:
     m5_atr = _atr(m5.high, m5.low, m5.close, ATR_PERIOD)
     m15_sma200 = _rolling_mean(m15.close, HTF_SMA)
 
-    for i in range(len(m5)):
+    for i in range(len(m5.close)):
         source_index = int(m5.source_last_index[i])
         if source_index < 0 or source_index >= n:
             continue
