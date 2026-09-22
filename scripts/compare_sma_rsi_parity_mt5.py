@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -145,12 +146,90 @@ def _parse_python_time(value: str) -> datetime:
     return parsed
 
 
+_GUARD_PATTERNS = (
+    ("SKIPPED_SPREAD_GUARD", "No trade: spread="),
+    ("SKIPPED_INDICATOR_DATA", "Indicator data unavailable."),
+    ("SKIPPED_HTF_DATA", "HTF completed-bar data unavailable"),
+    ("SKIPPED_VOLUME_GUARD", "Trade skipped: invalid/below-minimum volume."),
+    ("SKIPPED_RISK_CALC", "OrderCalcProfit failed"),
+    ("SKIPPED_ORDER_FAILED", "Order failed |"),
+)
+_SIM_TIME_RE = re.compile(r"(20\\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}:\\d{2})")
+
+
+def _read_log_lines(path: Path) -> list[str]:
+    raw = path.read_bytes()
+    for encoding in ("utf-16", "utf-8-sig", "utf-8", "cp1252"):
+        try:
+            text = raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if "\\x00" not in text[:1000]:
+            return text.splitlines()
+    return raw.decode("utf-8", errors="replace").splitlines()
+
+
+def _extract_v21_run(lines: list[str]) -> list[str]:
+    start_candidates = [
+        i
+        for i, line in enumerate(lines)
+        if "testing of Experts\\V2_1_HTFTrend.ex5" in line and "started with inputs:" in line
+    ]
+    if not start_candidates:
+        start_candidates = [
+            i for i, line in enumerate(lines) if '"V2_1_HTFTrend.ex5" AVX2' in line
+        ]
+    if not start_candidates:
+        raise ValueError("could not locate V2_1_HTFTrend test start in MT5 log")
+
+    start = start_candidates[-1]
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        line = lines[i]
+        if "Test passed in" in line:
+            end = i + 1
+            break
+        if "final balance" in line:
+            end = i + 1
+    return lines[start:end]
+
+
+def _extract_guard_buckets(path: Path) -> tuple[dict[datetime, tuple[str, str]], dict[str, int]]:
+    lines = _extract_v21_run(_read_log_lines(path))
+    by_bucket: dict[datetime, tuple[str, str]] = {}
+    totals: dict[str, int] = {}
+
+    for line in lines:
+        matched_kind = None
+        for kind, needle in _GUARD_PATTERNS:
+            if needle in line:
+                matched_kind = kind
+                break
+        if matched_kind is None:
+            continue
+
+        time_match = _SIM_TIME_RE.search(line)
+        if time_match is None:
+            continue
+        when = _parse_mt5_time(time_match.group(1))
+        bucket = _m5_bucket(when)
+        totals[matched_kind] = totals.get(matched_kind, 0) + 1
+        by_bucket.setdefault(bucket, (matched_kind, line.strip()))
+
+    return by_bucket, totals
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compare SMA/RSI Python raw signals with an MT5 Strategy Tester report."
     )
     parser.add_argument("--python-signals", type=Path, required=True)
     parser.add_argument("--mt5-report", type=Path, required=True)
+    parser.add_argument(
+        "--mt5-log",
+        type=Path,
+        help="Optional MT5 tester/agent log used to explain flat-state Python signals by execution guard.",
+    )
     parser.add_argument("--output", type=Path, default=Path("results/sma_rsi_htf_v21/PARITY_CLASSIFICATION.csv"))
     parser.add_argument("--summary", type=Path, default=Path("results/sma_rsi_htf_v21/PARITY_SUMMARY.json"))
     parser.add_argument(
@@ -163,6 +242,10 @@ def main() -> None:
 
     mt5_entries, intervals = _extract_mt5(args.mt5_report)
     mt5_keys = {(item["bucket"], item["direction"]) for item in mt5_entries}
+    guard_buckets: dict[datetime, tuple[str, str]] = {}
+    guard_totals: dict[str, int] = {}
+    if args.mt5_log is not None:
+        guard_buckets, guard_totals = _extract_guard_buckets(args.mt5_log)
 
     with args.python_signals.open("r", encoding="utf-8", newline="") as handle:
         python_rows = list(csv.DictReader(handle))
@@ -191,12 +274,18 @@ def main() -> None:
             if open_interval is not None:
                 classification = "SKIPPED_POSITION_OPEN"
             else:
-                classification = "PYTHON_ONLY_WHILE_MT5_FLAT"
+                guard = guard_buckets.get(bucket)
+                if guard is not None:
+                    classification = guard[0]
+                else:
+                    classification = "PYTHON_ONLY_WHILE_MT5_FLAT"
 
         output = dict(row)
         output["comparison_time"] = when.strftime("%Y-%m-%d %H:%M:%S")
         output["comparison_m5_bucket"] = bucket.strftime("%Y-%m-%d %H:%M:%S")
         output["classification"] = classification
+        guard = guard_buckets.get(bucket)
+        output["mt5_guard_log"] = guard[1] if guard is not None else ""
         classified.append(output)
 
     mt5_missing = [
@@ -215,8 +304,15 @@ def main() -> None:
         "python_offset_minutes": args.python_offset_minutes,
         "executed_matches": counts.get("EXECUTED_MATCH", 0),
         "python_skipped_while_mt5_position_open": counts.get("SKIPPED_POSITION_OPEN", 0),
+        "python_skipped_spread_guard": counts.get("SKIPPED_SPREAD_GUARD", 0),
+        "python_skipped_indicator_data": counts.get("SKIPPED_INDICATOR_DATA", 0),
+        "python_skipped_htf_data": counts.get("SKIPPED_HTF_DATA", 0),
+        "python_skipped_volume_guard": counts.get("SKIPPED_VOLUME_GUARD", 0),
+        "python_skipped_risk_calc": counts.get("SKIPPED_RISK_CALC", 0),
+        "python_skipped_order_failed": counts.get("SKIPPED_ORDER_FAILED", 0),
         "python_only_while_mt5_flat": counts.get("PYTHON_ONLY_WHILE_MT5_FLAT", 0),
         "mt5_entries_missing_python_signal": len(mt5_missing),
+        "mt5_log_guard_totals": guard_totals,
         "parity_pass": (
             counts.get("PYTHON_ONLY_WHILE_MT5_FLAT", 0) == 0
             and len(mt5_missing) == 0
@@ -224,7 +320,8 @@ def main() -> None:
         "notes": [
             "Matching is by M5 bucket and direction, so MT5 first-tick seconds do not create false mismatches.",
             "Python-only signals while an MT5 position was open are expected from InpOnePositionOnly behavior.",
-            "Python-only signals while MT5 was flat still require tester-log review for spread/order/data guards.",
+            "When --mt5-log is supplied, flat-state Python signals are matched by M5 bucket to MT5 spread/data/risk/order guard messages.",
+            "Only PYTHON_ONLY_WHILE_MT5_FLAT remains unexplained after tester-log guard matching.",
         ],
         "mt5_missing_examples": [
             {
