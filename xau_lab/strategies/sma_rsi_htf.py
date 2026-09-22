@@ -62,7 +62,6 @@ def _aggregate_complete_minutes(ctx: StrategyContext, minutes: int) -> _Aggregat
         return _empty_aggregate()
 
     seconds = minutes * 60
-    expected = minutes
     time = np.asarray(ctx.time_epoch, dtype=np.int64)
 
     bucket = time // seconds
@@ -82,13 +81,14 @@ def _aggregate_complete_minutes(ctx: StrategyContext, minutes: int) -> _Aggregat
         bucket_start = int(bucket[start]) * seconds
         times = time[start:stop]
 
-        if len(times) != expected:
+        # MT5 still forms an M5/M15 bar when individual M1 minutes inside the
+        # interval have no ticks. Aggregate every non-empty time bucket instead
+        # of requiring exactly 5/15 source rows.
+        if len(times) == 0:
             continue
-        if int(times[0]) != bucket_start:
+        if np.any(times < bucket_start) or np.any(times >= bucket_start + seconds):
             continue
-        if int(times[-1]) != bucket_start + seconds - 60:
-            continue
-        if len(times) > 1 and not np.all(np.diff(times) == 60):
+        if len(times) > 1 and not np.all(np.diff(times) > 0):
             continue
 
         o = float(ctx.open[start])
@@ -139,8 +139,9 @@ def build_sma_rsi_htf_state(ctx: StrategyContext) -> SmaRsiHtfState:
     data are continuous. This mirrors the MT5 EA evaluating closed bars on the
     first tick of a new M5 candle.
 
-    No signal is emitted across a gap because the next M1 row must begin exactly
-    at the completed M5 close timestamp.
+    A signal may enter on a later minute inside the immediately following M5
+    bucket when the first minute(s) contain no ticks. It is never carried across
+    an entirely empty M5 bucket or a market-closure gap.
     """
 
     m5 = _aggregate_complete_minutes(ctx, 5)
@@ -167,8 +168,12 @@ def build_sma_rsi_htf_state(ctx: StrategyContext) -> SmaRsiHtfState:
         if i == 0 or source_index + 1 >= n:
             continue
 
-        # Entry must be able to occur on the immediate next M1 row/new M5 open.
-        if int(ctx.time_epoch[source_index + 1]) != int(m5.close_time[i]):
+        # MT5 evaluates on the first tick of the next M5 bar. The first source
+        # M1 row may be one or more minutes after the nominal M5 open when those
+        # early minutes had no ticks, but it must still belong to the immediately
+        # following M5 bucket. Never carry a signal across an entirely empty M5 bar.
+        next_time = int(ctx.time_epoch[source_index + 1])
+        if next_time // 300 != int(m5.close_time[i]) // 300:
             continue
 
         fast_now = m5_fast[i]
