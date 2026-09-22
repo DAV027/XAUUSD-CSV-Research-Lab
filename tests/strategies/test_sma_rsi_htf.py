@@ -191,3 +191,8 @@ def test_frozen_strategy_rejects_parameter_tuning_and_is_registered():
 def test_parity_export_script_is_syntax_valid():
     path = Path("scripts/export_sma_rsi_htf_parity.py")
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_mt5_parity_comparator_is_syntax_valid():
+    path = Path("scripts/compare_sma_rsi_parity_mt5.py")
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
