@@ -207,3 +207,8 @@ def test_mt5_guard_timestamp_regex_matches_tester_lines():
     )
     assert match is not None
     assert match.group(1) == "2026.06.01 01:05:00"
+
+
+def test_trade_construction_parity_script_is_syntax_valid():
+    path = Path("scripts/compare_sma_rsi_trade_construction_mt5.py")
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
