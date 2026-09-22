@@ -240,3 +240,8 @@ def test_mt5_iatr_matches_rolling_true_range_average():
 def test_volume_parity_script_is_syntax_valid():
     path = Path("scripts/compare_sma_rsi_volume_mt5.py")
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_lifecycle_parity_script_is_syntax_valid():
+    path = Path("scripts/compare_sma_rsi_lifecycle_mt5.py")
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
