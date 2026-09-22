@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -128,3 +130,8 @@ def test_frozen_strategy_rejects_parameter_tuning_and_is_registered():
 
     with pytest.raises(ValueError, match="frozen"):
         sma_rsi_htf_v21(ctx, {"fast_sma": 10})
+
+
+def test_parity_export_script_is_syntax_valid():
+    path = Path("scripts/export_sma_rsi_htf_parity.py")
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
