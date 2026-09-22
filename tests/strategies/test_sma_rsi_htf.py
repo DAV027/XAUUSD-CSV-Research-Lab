@@ -97,12 +97,39 @@ def test_htf_filter_never_uses_a_m15_bar_that_closes_after_the_m5_signal():
         assert state.m15_close_time[htf_index + 1] > state.m5_close_time[m5_index]
 
 
-def test_no_signal_is_carried_across_a_gap_after_completed_m5_bar():
+def test_signal_can_enter_on_later_minute_inside_immediately_following_m5_bar():
     ctx = _context_from_m5_closes(_bullish_fixture())
     signal_index = 649 * 5 + 4
 
     keep = np.ones(len(ctx), dtype=bool)
     keep[signal_index + 1] = False
+    sparse = StrategyContext(
+        open=ctx.open[keep],
+        high=ctx.high[keep],
+        low=ctx.low[keep],
+        close=ctx.close[keep],
+        spread=ctx.spread[keep],
+        atr14=ctx.atr14[keep],
+        time_epoch=ctx.time_epoch[keep],
+        features={},
+    )
+
+    state = build_sma_rsi_htf_state(sparse)
+    signal_indexes = np.flatnonzero(state.signal)
+    assert len(signal_indexes) == 1
+
+    sparse_signal_index = int(signal_indexes[0])
+    next_time = int(sparse.time_epoch[sparse_signal_index + 1])
+    assert next_time // 300 == int(state.m5_close_time[649]) // 300
+    assert next_time > int(state.m5_close_time[649])
+
+
+def test_no_signal_is_carried_across_an_entirely_empty_next_m5_bar():
+    ctx = _context_from_m5_closes(_bullish_fixture())
+    signal_index = 649 * 5 + 4
+
+    keep = np.ones(len(ctx), dtype=bool)
+    keep[signal_index + 1 : signal_index + 6] = False
     gapped = StrategyContext(
         open=ctx.open[keep],
         high=ctx.high[keep],
@@ -116,6 +143,35 @@ def test_no_signal_is_carried_across_a_gap_after_completed_m5_bar():
 
     state = build_sma_rsi_htf_state(gapped)
     assert np.count_nonzero(state.signal) == 0
+
+
+def test_sparse_minutes_still_form_m5_and_m15_bars_like_mt5():
+    ctx = _context_from_m5_closes(_bullish_fixture())
+
+    # Remove one interior M1 minute from a historical M15 block, without
+    # removing the whole M5 or M15 bucket.
+    remove_index = 500 * 5 + 2
+    keep = np.ones(len(ctx), dtype=bool)
+    keep[remove_index] = False
+    sparse = StrategyContext(
+        open=ctx.open[keep],
+        high=ctx.high[keep],
+        low=ctx.low[keep],
+        close=ctx.close[keep],
+        spread=ctx.spread[keep],
+        atr14=ctx.atr14[keep],
+        time_epoch=ctx.time_epoch[keep],
+        features={},
+    )
+
+    state = build_sma_rsi_htf_state(sparse)
+
+    # The sparse source minute must not delete its enclosing M5/M15 market bar.
+    target_epoch = int(ctx.time_epoch[500 * 5]) // 300 * 300 + 300
+    assert target_epoch in set(state.m5_close_time.tolist())
+
+    target_m15_epoch = int(ctx.time_epoch[500 * 5]) // 900 * 900 + 900
+    assert target_m15_epoch in set(state.m15_close_time.tolist())
 
 
 def test_frozen_strategy_rejects_parameter_tuning_and_is_registered():
