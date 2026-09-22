@@ -235,3 +235,8 @@ def test_mt5_iatr_matches_rolling_true_range_average():
     assert atr[3] == pytest.approx(np.mean(tr[1:4]))
     assert atr[4] == pytest.approx(np.mean(tr[2:5]))
     assert atr[5] == pytest.approx(np.mean(tr[3:6]))
+
+
+def test_volume_parity_script_is_syntax_valid():
+    path = Path("scripts/compare_sma_rsi_volume_mt5.py")
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
