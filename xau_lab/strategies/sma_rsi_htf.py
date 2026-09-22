@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from xau_lab.data.features import _rolling_mean, _rsi, _wilder
+from xau_lab.data.features import _rolling_mean, _rsi
 from xau_lab.strategies.base import StrategyContext, StrategyDefinition
 from xau_lab.strategies.registry import register_strategy
 
@@ -115,19 +115,26 @@ def _aggregate_complete_minutes(ctx: StrategyContext, minutes: int) -> _Aggregat
     )
 
 
-def _atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, window: int) -> np.ndarray:
-    if len(close) == 0:
-        return np.empty(0, dtype=np.float64)
-    previous_close = np.roll(close, 1)
-    previous_close[0] = close[0]
-    true_range = np.maximum.reduce(
-        [
-            high - low,
-            np.abs(high - previous_close),
-            np.abs(low - previous_close),
-        ]
-    )
-    return _wilder(true_range, window)
+def _mt5_iatr(high: np.ndarray, low: np.ndarray, close: np.ndarray, window: int) -> np.ndarray:
+    """Reproduce MetaTrader 5 built-in iATR buffer calculation.
+
+    MT5 bundled ATR is a rolling simple average of True Range, not Wilder/RMA.
+    TR[0] is zero and the first ATR value is produced at index window from
+    TR[1:window+1].
+    """
+    high = np.asarray(high, dtype=np.float64)
+    low = np.asarray(low, dtype=np.float64)
+    close = np.asarray(close, dtype=np.float64)
+    out = np.full(close.shape, np.nan, dtype=np.float64)
+    if window <= 0 or close.size <= window:
+        return out
+
+    true_range = np.zeros(close.shape, dtype=np.float64)
+    true_range[1:] = np.maximum(high[1:], close[:-1]) - np.minimum(low[1:], close[:-1])
+
+    rolling = _rolling_mean(true_range, window)
+    out[window:] = rolling[window:]
+    return out
 
 
 def build_sma_rsi_htf_state(ctx: StrategyContext) -> SmaRsiHtfState:
@@ -154,7 +161,7 @@ def build_sma_rsi_htf_state(ctx: StrategyContext) -> SmaRsiHtfState:
     m5_fast = _rolling_mean(m5.close, FAST_SMA)
     m5_slow = _rolling_mean(m5.close, SLOW_SMA)
     m5_rsi = _rsi(m5.close, RSI_PERIOD)
-    m5_atr = _atr(m5.high, m5.low, m5.close, ATR_PERIOD)
+    m5_atr = _mt5_iatr(m5.high, m5.low, m5.close, ATR_PERIOD)
     m15_sma200 = _rolling_mean(m15.close, HTF_SMA)
 
     for i in range(len(m5.close)):
