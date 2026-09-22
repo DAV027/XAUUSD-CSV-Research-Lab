@@ -196,3 +196,14 @@ def test_parity_export_script_is_syntax_valid():
 def test_mt5_parity_comparator_is_syntax_valid():
     path = Path("scripts/compare_sma_rsi_parity_mt5.py")
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_mt5_guard_timestamp_regex_matches_tester_lines():
+    import runpy
+
+    module = runpy.run_path("scripts/compare_sma_rsi_parity_mt5.py")
+    match = module["_SIM_TIME_RE"].search(
+        "Core 01 2026.06.01 01:05:00   No trade: spread=181.0 points."
+    )
+    assert match is not None
+    assert match.group(1) == "2026.06.01 01:05:00"
