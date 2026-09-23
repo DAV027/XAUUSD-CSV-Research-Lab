@@ -261,3 +261,8 @@ def test_tick_exit_fallback_logic_is_present():
     text = Path("scripts/compare_sma_rsi_tick_exits_mt5.py").read_text(encoding="utf-8")
     assert "entry_second_level_touch_ambiguities" in text
     assert "entry_second_fallbacks" in text
+
+
+def test_entry_delay_diagnostic_script_is_syntax_valid():
+    path = Path("scripts/diagnose_sma_rsi_entry_delay_mt5.py")
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
