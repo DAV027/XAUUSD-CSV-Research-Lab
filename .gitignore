@@ -2,3 +2,11 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# Local broker exports and generated research artifacts are never source files.
+/data/
+/datasets/
+/results/
+**/broker_date=*/ticks.parquet*
+*.egg-info/
+.venv/
