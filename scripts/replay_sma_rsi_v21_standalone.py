@@ -208,10 +208,9 @@ def _expected_volume(balance: float, request_entry: float, sl: float) -> float:
 
 
 def _exit_price(reason: str, direction: str, sl: float, tp: float, tick: dict) -> float:
-    if reason == "SL":
-        return sl
-    if reason == "TP":
-        return tp
+    # In the MT5 real-tick tester, the protective level is the trigger condition;
+    # the actual deal fill uses the market side on the triggering tick. This
+    # preserves gap/slippage through SL/TP instead of forcing the nominal level.
     return float(tick["bid"] if direction == "BUY" else tick["ask"])
 
 
@@ -269,7 +268,7 @@ def main() -> None:
             skip_counts["SPREAD"] += 1
             continue
 
-        if request_ms <= open_until_ms:
+        if request_ms < open_until_ms:
             skip_counts["POSITION"] += 1
             continue
 
