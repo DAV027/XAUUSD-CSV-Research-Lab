@@ -163,11 +163,14 @@ def main() -> None:
     rows: list[dict] = []
 
     entry_tick_missing = 0
+    entry_second_fallbacks = 0
+    entry_second_level_touch_ambiguities = 0
     trigger_missing = 0
     exit_reason_mismatches = 0
     exit_second_mismatches = 0
     ambiguous_triggers = 0
     protective_trades = 0
+    end_of_test_trades = 0
 
     for index, (log_trade, report_trade) in enumerate(
         zip(log_trades, report_trades), start=1
@@ -205,12 +208,8 @@ def main() -> None:
             "exit_second_match": False,
         }
 
-        if entry_tick_ms is None:
-            entry_tick_missing += 1
-            rows.append(row)
-            continue
-
         if report_reason == "END_OF_TEST":
+            end_of_test_trades += 1
             row["trigger_found"] = True
             row["exit_reason_match"] = True
             row["exit_second_match"] = True
@@ -218,16 +217,44 @@ def main() -> None:
             continue
 
         protective_trades += 1
+
+        replay_anchor_ms = entry_tick_ms
+        if entry_tick_ms is None:
+            entry_tick_missing += 1
+
+            # An exact MT5 deal fill price need not appear as a raw quote tick.
+            # We can still establish an exact protective-exit replay if no SL/TP
+            # level was touched anywhere in the reported entry second. In that
+            # case, beginning immediately after that second cannot skip an exit.
+            entry_second_reason, _, _ = _first_trigger(
+                entry_ticks,
+                report_trade["entry_direction"],
+                float(log_trade.sl),
+                float(log_trade.tp),
+                entry_start_ms - 1,
+            )
+            if entry_second_reason is not None:
+                entry_second_level_touch_ambiguities += 1
+                row["entry_second_level_touch"] = entry_second_reason
+                rows.append(row)
+                continue
+
+            entry_second_fallbacks += 1
+            row["entry_second_level_touch"] = ""
+            replay_anchor_ms = entry_end_ms
+        else:
+            row["entry_second_level_touch"] = ""
+
         exit_end_ms = _utc_ms(report_trade["exit_time"]) + 999
         replay_ticks = _load_window(
-            args.ticks_root, entry_tick_ms, exit_end_ms, cache
+            args.ticks_root, int(replay_anchor_ms), exit_end_ms, cache
         )
         reason, trigger_ms, trigger_price = _first_trigger(
             replay_ticks,
             report_trade["entry_direction"],
             float(log_trade.sl),
             float(log_trade.tp),
-            entry_tick_ms,
+            int(replay_anchor_ms),
         )
 
         row["tick_trigger_reason"] = reason or ""
@@ -262,8 +289,10 @@ def main() -> None:
         "log_trade_count": len(log_trades),
         "report_trade_count": len(report_trades),
         "protective_exit_trades": protective_trades,
-        "end_of_test_trades": len(report_trades) - protective_trades,
-        "entry_tick_missing": entry_tick_missing,
+        "end_of_test_trades": end_of_test_trades,
+        "entry_fill_tick_diagnostic_missing": entry_tick_missing,
+        "entry_second_fallbacks": entry_second_fallbacks,
+        "entry_second_level_touch_ambiguities": entry_second_level_touch_ambiguities,
         "trigger_missing": trigger_missing,
         "ambiguous_triggers": ambiguous_triggers,
         "exit_reason_mismatches": exit_reason_mismatches,
@@ -271,7 +300,7 @@ def main() -> None:
         "report_final_balance": report_final_balance,
         "tick_exit_parity_pass": (
             len(log_trades) > 0
-            and entry_tick_missing == 0
+            and entry_second_level_touch_ambiguities == 0
             and trigger_missing == 0
             and ambiguous_triggers == 0
             and exit_reason_mismatches == 0
@@ -280,7 +309,9 @@ def main() -> None:
         "scope": (
             "Replays protective exits against exported FXIFY COPY_TICKS_ALL data. "
             "BUY positions trigger on bid; SELL positions trigger on ask. Entry execution "
-            "ticks are anchored by the actual MT5 report fill price within the reported entry second. "
+            "ticks are anchored by the actual MT5 report fill price when that price exists in the raw tick stream. "
+            "If the deal fill price is not present as a raw quote, the validator first proves that neither SL nor TP "
+            "was touched anywhere in the reported entry second, then begins replay after that second. "
             "Tester/log timestamps for this frozen run are interpreted as UTC because they align "
             "with the raw tick epoch; time_broker is display metadata only. This stage validates "
             "the first protective-level crossing, not the 250 ms market-order request delay itself."
@@ -289,8 +320,7 @@ def main() -> None:
             row
             for row in rows
             if not (
-                bool(row["entry_tick_found"])
-                and bool(row["trigger_found"])
+                bool(row["trigger_found"])
                 and bool(row["exit_reason_match"])
                 and bool(row["exit_second_match"])
             )
