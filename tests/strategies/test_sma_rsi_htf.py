@@ -276,3 +276,8 @@ def test_cost_model_diagnostic_script_is_syntax_valid():
 def test_fxify_symbol_cost_probe_is_syntax_valid():
     path = Path("scripts/inspect_fxify_symbol_cost_spec.py")
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_standalone_v21_replay_script_is_syntax_valid():
+    path = Path("scripts/replay_sma_rsi_v21_standalone.py")
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
