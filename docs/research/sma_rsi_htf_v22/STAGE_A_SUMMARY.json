@@ -1,0 +1,404 @@
+{
+  "overall": {
+    "n": 364,
+    "wins": 185,
+    "losses": 179,
+    "net": 80.25,
+    "expectancy": 0.22046703296703335,
+    "pf": 1.0591971319819422,
+    "win_rate": 0.5082417582417582,
+    "average_winner": 7.761567567567567,
+    "average_loser": -7.57340782122905,
+    "max_losing_streak": 8,
+    "realized_balance_dd_pct": 2.854147824562088,
+    "net_ex_top5": -15.88
+  },
+  "monthly": {
+    "2026-06": {
+      "n": 116,
+      "wins": 57,
+      "losses": 59,
+      "net": 49.32,
+      "expectancy": 0.4251724137931039,
+      "pf": 1.1135960568440935,
+      "win_rate": 0.49137931034482757,
+      "average_winner": 8.482280701754386,
+      "average_loser": -7.358813559322032,
+      "max_losing_streak": 6,
+      "realized_balance_dd_pct": 1.241646002252137,
+      "net_ex_top5": -45.36
+    },
+    "2026-07": {
+      "n": 134,
+      "wins": 64,
+      "losses": 70,
+      "net": -80.28,
+      "expectancy": -0.5991044776119402,
+      "pf": 0.859525101051637,
+      "win_rate": 0.47761194029850745,
+      "average_winner": 7.67515625,
+      "average_loser": -8.164142857142856,
+      "max_losing_streak": 8,
+      "realized_balance_dd_pct": 2.594836591553514,
+      "net_ex_top5": -131.09
+    },
+    "2026-08": {
+      "n": 114,
+      "wins": 64,
+      "losses": 50,
+      "net": 111.21,
+      "expectancy": 0.9755263157894741,
+      "pf": 1.3177610149151382,
+      "win_rate": 0.5614035087719298,
+      "average_winner": 7.206093750000001,
+      "average_loser": -6.999599999999999,
+      "max_losing_streak": 5,
+      "realized_balance_dd_pct": 0.9058170029941153,
+      "net_ex_top5": 62.78
+    }
+  },
+  "sides": {
+    "BUY": {
+      "n": 182,
+      "wins": 91,
+      "losses": 91,
+      "net": 19.81,
+      "expectancy": 0.10884615384615401,
+      "pf": 1.0275786220434076,
+      "win_rate": 0.5,
+      "average_winner": 8.11120879120879,
+      "average_loser": -7.893516483516482,
+      "max_losing_streak": 10,
+      "realized_balance_dd_pct": 2.7136741475487143,
+      "net_ex_top5": -75.94
+    },
+    "SELL": {
+      "n": 182,
+      "wins": 94,
+      "losses": 88,
+      "net": 60.44,
+      "expectancy": 0.33208791208791233,
+      "pf": 1.0948331319724476,
+      "win_rate": 0.5164835164835165,
+      "average_winner": 7.423085106382981,
+      "average_loser": -7.242386363636364,
+      "max_losing_streak": 5,
+      "realized_balance_dd_pct": 2.1743620520335223,
+      "net_ex_top5": 10.65
+    }
+  },
+  "costs": {
+    "price_profit": 120.66,
+    "commission": -28.56,
+    "swap": -11.85
+  },
+  "winner_loser_features": {
+    "trend_efficiency": {
+      "win": {
+        "n": 185,
+        "median": 0.10777988614801162,
+        "mean": 0.12131073128439761
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.09655507035417941,
+        "mean": 0.10990740532092469
+      }
+    },
+    "sma_separation_atr": {
+      "win": {
+        "n": 185,
+        "median": 0.08051567554454758,
+        "mean": 0.1030170745265364
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.08510638497464813,
+        "mean": 0.1043240957261652
+      }
+    },
+    "sma_slope_aligned_atr": {
+      "win": {
+        "n": 185,
+        "median": -0.009197752364614434,
+        "mean": -0.01783285664843886
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.005407292203051027,
+        "mean": -0.0011398959395169063
+      }
+    },
+    "htf_distance_atr": {
+      "win": {
+        "n": 185,
+        "median": 7.535761263140588,
+        "mean": 9.920315272709008
+      },
+      "loss": {
+        "n": 179,
+        "median": 7.035728141869314,
+        "mean": 8.690049410254506
+      }
+    },
+    "rsi": {
+      "win": {
+        "n": 185,
+        "median": 49.504562706787546,
+        "mean": 49.29432057242481
+      },
+      "loss": {
+        "n": 179,
+        "median": 49.70155066963118,
+        "mean": 49.89118921454671
+      }
+    },
+    "rsi_momentum_aligned": {
+      "win": {
+        "n": 185,
+        "median": 3.9471277072880753,
+        "mean": 4.2199953501212235
+      },
+      "loss": {
+        "n": 179,
+        "median": 2.9701641557239,
+        "mean": 3.6039964722460778
+      }
+    },
+    "atr": {
+      "win": {
+        "n": 185,
+        "median": 4.161428571420921,
+        "mean": 4.090162162163698
+      },
+      "loss": {
+        "n": 179,
+        "median": 3.9750000000099783,
+        "mean": 4.08485235434952
+      }
+    },
+    "atr_percentile": {
+      "win": {
+        "n": 185,
+        "median": 0.3819444444444444,
+        "mean": 0.39298048048048045
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.3854166666666667,
+        "mean": 0.39364137181874603
+      }
+    },
+    "spread_points": {
+      "win": {
+        "n": 185,
+        "median": 28.999999999996362,
+        "mean": 33.816216216214954
+      },
+      "loss": {
+        "n": 179,
+        "median": 28.999999999996362,
+        "mean": 32.899441340779255
+      }
+    },
+    "spread_atr": {
+      "win": {
+        "n": 185,
+        "median": 0.07596185465347663,
+        "mean": 0.09539285398016148
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.07518518518517575,
+        "mean": 0.08988633441688022
+      }
+    },
+    "distance_high_atr": {
+      "win": {
+        "n": 185,
+        "median": 2.1248654467197676,
+        "mean": 2.107072675914288
+      },
+      "loss": {
+        "n": 179,
+        "median": 1.9162011173264555,
+        "mean": 1.956185260726557
+      }
+    },
+    "distance_low_atr": {
+      "win": {
+        "n": 185,
+        "median": 1.9593852908922773,
+        "mean": 2.043910582937755
+      },
+      "loss": {
+        "n": 179,
+        "median": 2.0774885145505704,
+        "mean": 2.0865472542037558
+      }
+    },
+    "candle_body_range": {
+      "win": {
+        "n": 185,
+        "median": 0.5015873015873364,
+        "mean": 0.49282449977804305
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.4826498422714889,
+        "mean": 0.47021825903304143
+      }
+    },
+    "candle_body_aligned": {
+      "win": {
+        "n": 185,
+        "median": 0.3070866141733115,
+        "mean": 0.1759161086809759
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.2432432432437083,
+        "mean": 0.18508666867410914
+      }
+    },
+    "upper_wick_fraction": {
+      "win": {
+        "n": 185,
+        "median": 0.23437500000013323,
+        "mean": 0.2753727046150316
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.19672131147593536,
+        "mean": 0.22990497606255608
+      }
+    },
+    "lower_wick_fraction": {
+      "win": {
+        "n": 185,
+        "median": 0.1839999999999418,
+        "mean": 0.23180279560692532
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.25465838509333966,
+        "mean": 0.29987676490440246
+      }
+    },
+    "volatility_expansion": {
+      "win": {
+        "n": 185,
+        "median": 0.8946081037966435,
+        "mean": 0.9666002420419536
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.9493967224923905,
+        "mean": 1.0257964966982787
+      }
+    },
+    "previous_body_aligned": {
+      "win": {
+        "n": 185,
+        "median": 0.20000000000025284,
+        "mean": 0.2362936107531902
+      },
+      "loss": {
+        "n": 179,
+        "median": 0.11404857055050832,
+        "mean": 0.16973312750741812
+      }
+    }
+  },
+  "june_only_tertile_cuts": {
+    "trend_efficiency": [
+      0.06812336912217895,
+      0.13411654536074274
+    ],
+    "sma_separation_atr": [
+      0.0482006629446347,
+      0.1364995499066626
+    ],
+    "sma_slope_aligned_atr": [
+      -0.09699326983093576,
+      0.07445663374484206
+    ],
+    "htf_distance_atr": [
+      3.718996249455436,
+      11.086573287447399
+    ],
+    "rsi": [
+      43.98021690171675,
+      51.253589643683355
+    ],
+    "rsi_momentum_aligned": [
+      1.1860595803418403,
+      7.218547982666126
+    ],
+    "atr": [
+      3.814523809531238,
+      4.791428571433894
+    ],
+    "atr_percentile": [
+      0.2372685185185185,
+      0.4375
+    ],
+    "spread_points": [
+      26.999999999952706,
+      30.00000000001819
+    ],
+    "spread_atr": [
+      0.05719441933719996,
+      0.07296662568683877
+    ],
+    "distance_high_atr": [
+      1.7853196213376727,
+      2.7375230298320954
+    ],
+    "distance_low_atr": [
+      0.912103573903521,
+      2.248874373126393
+    ],
+    "candle_body_range": [
+      0.3248945147677757,
+      0.664114641473129
+    ],
+    "candle_body_aligned": [
+      -0.021460567838030523,
+      0.5751825619062874
+    ],
+    "upper_wick_fraction": [
+      0.09157950948321288,
+      0.31124065570336495
+    ],
+    "lower_wick_fraction": [
+      0.11372716170906694,
+      0.3415670057002196
+    ],
+    "volatility_expansion": [
+      0.8460129747628101,
+      1.0779605770773495
+    ],
+    "previous_body_aligned": [
+      -0.05898803488343181,
+      0.3893726830050789
+    ]
+  },
+  "input_provenance": {
+    "repository_base": "3d63a68218a921b50c5e1406eab355c58c026a88",
+    "artifact_hashes": {
+      "ReportTester-719702901.xlsx": "f1d7eade2ba93f47b5964c99f4b00646b8b9d72d8968b1144090783c4fa0db2a",
+      "FXIFY_PYTHON_SIGNAL_PARITY.csv": "0cabc8210e642ac800c67c3727c6f7243fd257402d3c27b962dfde261ab5781d",
+      "STANDALONE_REPLAY.csv": "a6461e5a810c90abe118dc9d4b7fd3551a753f286e3f00f2173b06468fc767ad"
+    },
+    "feature_projection_sha256": "fc03edfe22e21458735271c93154f16c6e3b7cc39ed89860d09d1c5262da02d0",
+    "permitted_m1_rows": 1158680,
+    "first_broker_time": "2017-01-03 02:00:00",
+    "last_broker_time": "2026-08-29 02:49:00",
+    "cutoff": "2026-08-31 00:00 exclusive",
+    "signal_clock": "UTC",
+    "feature_source_clock": "EET",
+    "outcome_source": "MT5 reported net delta; existing standalone provides request-time spread only",
+    "stage": "observational_attribution_not_candidate_backtest"
+  }
+}
