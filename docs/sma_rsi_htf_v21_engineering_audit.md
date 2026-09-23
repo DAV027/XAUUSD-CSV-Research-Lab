@@ -83,6 +83,13 @@ No real market dataset, MT5 report, or tester log is tracked in this checkout. N
 - Recommended fix: add an explicit strict validation command with nonempty expected counts, ordered identity, complete unmatched tails and a failing exit status. Keep structural parity distinct from exact full parity.
 - Required test: empty/duplicate/missing/extra trades, mismatches in each field, exit-time precision, and one-cent residual failing exact parity.
 
+Additional diagnostic limitation: `scripts/diagnose_sma_rsi_exit_delay_mt5.py:main`
+uses the entry-second fallback without the protective-touch ambiguity check in
+`compare_sma_rsi_tick_exits_mt5.py:main`. Its diagnostic counts are not standalone
+execution proof. The volume comparator also approximates executed stop distance
+from half the SL/TP span; standalone sizing uses request entry to rounded SL.
+Do not consolidate these paths by assuming they are already interchangeable.
+
 ### MEDIUM
 
 **M1 — Aggregation assumes globally valid M1 input.**
@@ -174,3 +181,20 @@ No real market dataset, MT5 report, or tester log is tracked in this checkout. N
 ## Safe implementation boundary
 
 Only test/package and Git hygiene, behavioral regression tests, replay artifact writing, and documentation corrections are authorized in this pass. No signals, indicator math, risk/volume/price calculations, costs, delay selection, event order, period definitions, parser interpretation or parity tolerances will change. Any fix marked STOP above requires an explicit follow-up decision before altering behavior. No merge to main.
+
+## Implementation disposition
+
+- M6 and the test-import portion of L2: addressed with ignored broker-data roots/partitions and an explicit local test package, with regression tests.
+- M7 Windows setup: declared the missing Windows-only `tzdata` dependency. This supplies missing zone records; it does not change timezone conversion code. Exact dependency versions are recorded in the delivery evidence, not claimed as the original MT5 environment.
+- M4: added synthetic CLI and unit execution coverage, including strict failure for a one-cent exit-price discrepancy and unchanged replay when comparator prices change. Real development parity remains unrerun.
+- M5: fixed stale empty-run CSV and partial CSV serialization using a unique temporary file and atomic replacement. JSON and multi-file transaction risks remain open; analogous comparator writers are unchanged.
+- M1/M2: added future-price perturbation, prefix, sparse aggregation and RSI boundary regression tests. This strengthens coverage without changing signal or indicator functions; MT5 buffer equivalence remains unverified outside supplied evidence.
+- L1: corrected runbook sparse-bar, replay and engineering-freeze guidance. Frozen config bytes and period boundaries are unchanged.
+- C1 and H1–H8: behavior-affecting or evidence-dependent changes remain stopped as requested. Performance refactors, parser consolidation, stricter runtime validation, broker specification enforcement, CI expansion and full provenance manifests remain follow-up work.
+
+Initial clean Windows baseline: 447 passed / 150 failed, primarily unavailable
+timezone data. Host Python additionally hit eight collection errors from a
+third-party `tests` package. After setup fixes, the complete suite passed 600 tests;
+after the CSV fix and execution regressions, it passed 625. Two multiprocessing
+tests required execution outside the sandbox because Windows named pipes were
+denied within it. No test was disabled, skipped or relaxed to bypass this.
