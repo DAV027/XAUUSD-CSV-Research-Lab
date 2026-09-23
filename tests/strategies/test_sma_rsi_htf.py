@@ -266,3 +266,8 @@ def test_tick_exit_fallback_logic_is_present():
 def test_entry_delay_diagnostic_script_is_syntax_valid():
     path = Path("scripts/diagnose_sma_rsi_entry_delay_mt5.py")
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_cost_model_diagnostic_script_is_syntax_valid():
+    path = Path("scripts/diagnose_sma_rsi_cost_model_mt5.py")
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
