@@ -8,6 +8,7 @@ from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import polars as pl
 
@@ -33,6 +34,36 @@ SWAP_SHORT_POINTS = 36.963
 SWAP_MODE = "POINTS"
 TRIPLE_SWAP_WEEKDAY = 2  # Python weekday(): Wednesday
 WEEKDAY_MULTIPLIERS = {0: 1, 1: 1, 2: 3, 3: 1, 4: 1, 5: 0, 6: 0}
+
+REPLAY_FIELDS = (
+    "trade_index", "signal_bucket", "direction", "request_msc", "request_entry",
+    "spread_points", "atr", "sl", "tp", "volume", "fill_msc", "fill_price",
+    "exit_reason", "exit_msc", "exit_time", "exit_price", "price_profit",
+    "commission", "swap", "net", "balance",
+)
+
+
+def _write_replay_csv(path: Path, trades: list[dict]) -> None:
+    """Replace a complete ledger, including its header for a zero-trade run.
+
+    The CSV replacement is atomic; the CSV and summary are not a transaction.
+    A serialization failure leaves the previous CSV intact.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            writer = csv.DictWriter(handle, fieldnames=REPLAY_FIELDS)
+            writer.writeheader()
+            writer.writerows(trades)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _parse_python_time(value: str) -> datetime:
@@ -481,12 +512,7 @@ def main() -> None:
         "mismatch_examples": mismatch_examples,
     }
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    if replay_trades:
-        with args.output.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(replay_trades[0].keys()))
-            writer.writeheader()
-            writer.writerows(replay_trades)
+    _write_replay_csv(args.output, replay_trades)
     args.summary.parent.mkdir(parents=True, exist_ok=True)
     args.summary.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
