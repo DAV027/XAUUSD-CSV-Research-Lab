@@ -286,3 +286,8 @@ def test_standalone_v21_replay_script_is_syntax_valid():
 def test_exit_delay_diagnostic_script_is_syntax_valid():
     path = Path("scripts/diagnose_sma_rsi_exit_delay_mt5.py")
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_price_rounding_diagnostic_script_is_syntax_valid():
+    path = Path("scripts/diagnose_sma_rsi_price_rounding_mt5.py")
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
