@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "name": "h16_us_macro_surprise_v1",
+  "status": "frozen_design",
+  "event_families": [
+    "CPI",
+    "CORE_CPI",
+    "NFP",
+    "UNEMPLOYMENT",
+    "PCE",
+    "CORE_PCE"
+  ],
+  "directionality": {
+    "CPI": 1,
+    "CORE_CPI": 1,
+    "NFP": 1,
+    "UNEMPLOYMENT": -1,
+    "PCE": 1,
+    "CORE_PCE": 1
+  },
+  "normalization": {
+    "rolling_prior_releases": 24,
+    "minimum_prior_releases": 8,
+    "sample_std_ddof": 1,
+    "rule": "surprise_std(t) = signed(actual-consensus) / sample_std(prior signed surprises from the same event family); current/future releases are excluded"
+  },
+  "decision_delay_seconds": 60,
+  "development_period": {
+    "from": "2023-01-01",
+    "to_exclusive": "2025-09-01"
+  },
+  "final_oos": {
+    "from": "2025-09-01",
+    "to_exclusive": "2026-06-01",
+    "status": "reserved_untouched",
+    "instruction": "Do not inspect H16 returns or tune thresholds using this period before the preregistered OOS run."
+  },
+  "canonical_output": "data/macro/h16_us_macro_events.csv",
+  "research_rule": "No strategy thresholds or XAUUSD direction mapping may be inferred from OOS. Macro surprise sign is descriptive only; gold direction is tested separately."
+}
