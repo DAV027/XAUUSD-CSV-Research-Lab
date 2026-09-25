@@ -10,6 +10,37 @@
     "PCE",
     "CORE_PCE"
   ],
+  "metric_definitions": {
+    "CPI": {
+      "metric": "percent_change_from_preceding_month",
+      "seasonal_adjustment": "seasonally_adjusted",
+      "unit": "% m/m"
+    },
+    "CORE_CPI": {
+      "metric": "percent_change_from_preceding_month_ex_food_energy",
+      "seasonal_adjustment": "seasonally_adjusted",
+      "unit": "% m/m"
+    },
+    "NFP": {
+      "metric": "monthly_change_total_nonfarm_payroll_employment",
+      "unit": "k"
+    },
+    "UNEMPLOYMENT": {
+      "metric": "u3_unemployment_rate",
+      "seasonal_adjustment": "seasonally_adjusted",
+      "unit": "%"
+    },
+    "PCE": {
+      "metric": "percent_change_from_preceding_month",
+      "seasonal_adjustment": "seasonally_adjusted",
+      "unit": "% m/m"
+    },
+    "CORE_PCE": {
+      "metric": "percent_change_from_preceding_month_ex_food_energy",
+      "seasonal_adjustment": "seasonally_adjusted",
+      "unit": "% m/m"
+    }
+  },
   "directionality": {
     "CPI": 1,
     "CORE_CPI": 1,
@@ -35,6 +66,12 @@
     "status": "reserved_untouched",
     "instruction": "Do not inspect H16 returns or tune thresholds using this period before the preregistered OOS run."
   },
+  "official_actuals_output": "data/macro/h16_official_actuals.csv",
   "canonical_output": "data/macro/h16_us_macro_events.csv",
+  "source_policy": {
+    "actuals": "Archived official BLS and BEA release pages only.",
+    "consensus": "Must come from a separately recorded pre-release consensus source. Official actuals collector intentionally leaves consensus blank.",
+    "revisions": "Do not replace as-released headline values with later revised time-series values."
+  },
   "research_rule": "No strategy thresholds or XAUUSD direction mapping may be inferred from OOS. Macro surprise sign is descriptive only; gold direction is tested separately."
 }
